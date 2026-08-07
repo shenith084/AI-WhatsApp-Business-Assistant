@@ -26,7 +26,7 @@ services:
     ports:
       - "3000:3000"          # WAHA dashboard: http://localhost:3000
     volumes:
-      - waha_data:/app/.waha/sessions
+      - waha_data:/app/.waha
     environment:
       # Security — required if WHATSAPP_API_KEY is set
       WHATSAPP_API_KEY: ${WAHA_API_KEY}
@@ -117,3 +117,6 @@ services:
 
       # ── Community nodes ──
       N8N_COMMUNITY_PACKAGES_ENABLED: "true"
+
+      # ── Auto-activate all workflows on startup ──
+      N8N_SKIP_WEBHOOK_DEREGISTRATION_SHUTDOWN: "true"
