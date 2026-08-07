@@ -1,0 +1,446 @@
+{
+  "name": "05 — Human Handoff",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// §10.5 — Human Handoff entry point\n// Triggered by: COMPLAINT, HUMAN_HANDOFF_REQUEST, or confidence < 0.6\nconst ctx = $input.item.json;\n\n// Determine the handoff reason\nlet reason = 'low_confidence';\nif (ctx.intent === 'COMPLAINT')              reason = 'complaint';\nif (ctx.intent === 'HUMAN_HANDOFF_REQUEST') reason = 'customer_request';\n\nreturn [{ json: { ...ctx, handoff_reason: reason } }];\n"
+      },
+      "id": "node_handoff_entry",
+      "name": "Handoff Entry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- §10.5 Node 2: Fetch last 10 messages for context\nSELECT direction, message_text, detected_intent, confidence, created_at\nFROM conversations\nWHERE business_id = '{{ $json.business_id }}' AND customer_number = '{{ $json.phoneNumber }}'\nORDER BY created_at DESC\nLIMIT 10;",
+        "options": {}
+      },
+      "id": "node_fetch_history",
+      "name": "Fetch Chat History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_cred",
+          "name": "Supabase PostgreSQL"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build chat snapshot and AI context for the handoff\nconst history  = $input.all().map(i => i.json);\nconst ctx      = $('Handoff Entry').item.json;\n\nconst chatSnapshot = history.map(msg => ({\n  direction:  msg.direction,\n  text:       msg.message_text,\n  intent:     msg.detected_intent,\n  confidence: msg.confidence,\n  at:         msg.created_at\n}));\n\nconst chatText = history\n  .slice().reverse()\n  .map(m => `[${m.direction.toUpperCase()}] ${m.message_text}`)\n  .join('\\n');\n\nreturn [{\n  json: {\n    ...ctx,\n    chat_snapshot: JSON.stringify(chatSnapshot),\n    chat_text:     chatText\n  }\n}];\n"
+      },
+      "id": "node_build_snapshot",
+      "name": "Build Chat Snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- §10.5 Node 3: Insert support ticket\nINSERT INTO support_tickets\n  (business_id, customer_number, reason, chat_snapshot, status)\nVALUES ('{{ $json.business_id }}', '{{ $json.phoneNumber }}', '{{ (typeof $json.handoff_reason === 'string' ? $json.handoff_reason.replace(/'/g, \"''\") : JSON.stringify($json.handoff_reason).replace(/'/g, \"''\")) }}', '{{ JSON.stringify($json.chat_snapshot).replace(/'/g, \"''\") }}'::jsonb, 'open')\nRETURNING id AS ticket_id;",
+        "options": {}
+      },
+      "id": "node_insert_ticket",
+      "name": "Create Support Ticket",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_cred",
+          "name": "Supabase PostgreSQL"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiText   = $input.item.json.candidates?.[0]?.content?.parts?.[0]?.text ?? $input.item.json.candidates?.[0]?.content?.parts?.[0]?.text ?? '';\nconst ctx      = $('Build Chat Snapshot').item.json;\nconst ticketId = $('Create Support Ticket').item.json.ticket_id;\n\nreturn [{\n  json: {\n    ...ctx,\n    ticket_id:       ticketId,\n    suggested_reply: aiText.trim()\n  }\n}];\n"
+      },
+      "id": "node_parse_suggestion",
+      "name": "Parse Suggested Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets SET suggested_reply = '{{ (typeof $json.suggested_reply === 'string' ? $json.suggested_reply.replace(/'/g, \"''\") : JSON.stringify($json.suggested_reply).replace(/'/g, \"''\")) }}' WHERE id = '{{ $json.ticket_id }}';",
+        "options": {}
+      },
+      "id": "node_save_suggestion",
+      "name": "Save Suggested Reply",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_cred",
+          "name": "Supabase PostgreSQL"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "https://api.brevo.com/v3/smtp/email",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api-key",
+              "value": "={{ $env.BREVO_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"sender\": { \"name\": \"{{ $env.BREVO_SENDER_NAME }}\", \"email\": \"{{ $env.BREVO_SENDER_EMAIL }}\" },\n  \"to\": [{ \"email\": \"{{ $env.OWNER_EMAIL }}\" }],\n  \"subject\": \"⚠️ Customer Handoff Required — {{ $json.handoff_reason }}\",\n  \"htmlContent\": \"<h2>Human Handoff Required</h2><p><strong>Ticket ID:</strong> {{ $json.ticket_id }}</p><p><strong>Customer:</strong> {{ $json.phoneNumber }}</p><p><strong>Reason:</strong> {{ $json.handoff_reason }}</p><h3>Chat History</h3><pre>{{ $json.chat_text }}</pre><h3>AI Suggested Reply</h3><p>{{ $json.suggested_reply }}</p>\"\n}",
+        "options": {
+          "retry": {
+            "enabled": true,
+            "maxRetries": 3,
+            "waitBetweenTries": 3000
+          }
+        }
+      },
+      "id": "node_notify_agent_email",
+      "name": "Notify Agent (Email)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        200
+      ],
+      "notes": "§10.5 Node 5: Sends full chat history + suggested reply to agent via email."
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.WAHA_BASE_URL }}/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $env.WAHA_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session",
+              "value": "={{ $env.PILOT_WAHA_SESSION }}"
+            },
+            {
+              "name": "chatId",
+              "value": "={{ $env.OWNER_WHATSAPP }}"
+            },
+            {
+              "name": "text",
+              "value": "=⚠️ *Handoff Required*\nTicket: {{ $json.ticket_id }}\nCustomer: {{ $json.phoneNumber }}\nReason: {{ $json.handoff_reason }}\n\n💬 *Suggested Reply:*\n{{ $json.suggested_reply }}\n\nCheck email for full chat history."
+            }
+          ]
+        },
+        "options": {
+          "retry": {
+            "enabled": true,
+            "maxRetries": 3,
+            "waitBetweenTries": 2000
+          }
+        }
+      },
+      "id": "node_notify_agent_wa",
+      "name": "Notify Agent (WhatsApp)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.WAHA_BASE_URL }}/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $env.WAHA_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session",
+              "value": "={{ $env.PILOT_WAHA_SESSION }}"
+            },
+            {
+              "name": "chatId",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "name": "text",
+              "value": "=I'm really sorry to hear that! 🙏 I'm connecting you with our team right now — they'll reply to you shortly and make sure this is sorted out. Thank you for your patience! 😊"
+            }
+          ]
+        },
+        "options": {
+          "retry": {
+            "enabled": true,
+            "maxRetries": 3,
+            "waitBetweenTries": 2000
+          }
+        }
+      },
+      "id": "node_holding_message",
+      "name": "Send Holding Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        480
+      ],
+      "notes": "§10.5 Node 6: Empathetic holding message sent to customer while agent is being notified."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversations (business_id, customer_number, direction, message_text)\nVALUES ('{{ $json.business_id }}', '{{ $json.phoneNumber }}', 'outbound', 'Handoff holding message sent — ticket {{ $json.ticket_id }}');",
+        "options": {}
+      },
+      "id": "node_log_handoff",
+      "name": "Log Handoff",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        340
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_cred",
+          "name": "Supabase PostgreSQL"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {},
+      "id": "node_execute_trigger",
+      "name": "Workflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "id": "node_call_gemini_api",
+      "name": "Call Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/={{ $env.GEMINI_RESPONSE_MODEL }}:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: `You are an AI assistant helping a human agent at a clothing business take over a WhatsApp conversation.\n\nYou are given the last 10 messages from a customer conversation. Write a concise (3–5 sentence) suggested reply that:\n1. Acknowledges the customer's issue or request\n2. Expresses genuine empathy (if it's a complaint)\n3. Commits to resolving it\n4. Asks one clarifying question if needed\n\nDo NOT include any preamble or explanation — just write the reply text directly, as if you are the human agent.\\n\\nCustomer Message: ${$json.messageText ?? \"\"}` }] }] }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Handoff Entry": {
+      "main": [
+        [
+          {
+            "node": "Fetch Chat History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Chat History": {
+      "main": [
+        [
+          {
+            "node": "Build Chat Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Chat Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Create Support Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Support Ticket": {
+      "main": [
+        [
+          {
+            "node": "Call Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Suggested Reply": {
+      "main": [
+        [
+          {
+            "node": "Save Suggested Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Suggested Reply": {
+      "main": [
+        [
+          {
+            "node": "Notify Agent (Email)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Agent (WhatsApp)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Holding Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Agent (Email)": {
+      "main": [
+        [
+          {
+            "node": "Log Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Agent (WhatsApp)": {
+      "main": [
+        [
+          {
+            "node": "Log Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Holding Message": {
+      "main": [
+        [
+          {
+            "node": "Log Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Input": {
+      "main": [
+        [
+          {
+            "node": "Handoff Entry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Gemini API": {
+      "main": [
+        [
+          {
+            "node": "Parse Suggested Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "error_handler_workflow"
+  },
+  "versionId": "1"
+}

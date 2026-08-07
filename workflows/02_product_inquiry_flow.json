@@ -1,0 +1,381 @@
+{
+  "name": "02 — Product Inquiry Flow",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Look up products matching the customer's query (§10.2 Node 1)\n-- Searches by name (full-text) or category entity extracted from classifier\nSELECT\n  id, name, description, price, category, stock, variants, image_url, tags\nFROM products\nWHERE\n  business_id = '{{ $json.business_id }}'\n  AND is_active = true\n  AND (\n    -- match by category entity (exact)\n    category ILIKE '{{ $json.entities?.product_category ?? '' }}'\n    -- OR full-text match on name\n    OR to_tsvector('english', name) @@ plainto_tsquery('english', '{{ (typeof $json.entities?.product_name ?? $json.messageText === 'string' ? $json.entities?.product_name ?? $json.messageText.replace(/'/g, \"''\") : JSON.stringify($json.entities?.product_name ?? $json.messageText).replace(/'/g, \"''\")) }}')\n    -- OR tag match\n    OR '{{ (typeof $json.entities?.product_name ?? $json.messageText === 'string' ? $json.entities?.product_name ?? $json.messageText.replace(/'/g, \"''\") : JSON.stringify($json.entities?.product_name ?? $json.messageText).replace(/'/g, \"''\")) }}' = ANY(tags)\n  )\nORDER BY\n  -- Boost exact name matches\n  CASE WHEN name ILIKE '%' || '{{ (typeof $json.entities?.product_name ?? $json.messageText === 'string' ? $json.entities?.product_name ?? $json.messageText.replace(/'/g, \"''\") : JSON.stringify($json.entities?.product_name ?? $json.messageText).replace(/'/g, \"''\")) }}' || '%' THEN 0 ELSE 1 END,\n  -- Then by best seller tags\n  CASE WHEN 'best seller' = ANY(tags) THEN 0 ELSE 1 END\nLIMIT 3;",
+        "options": {}
+      },
+      "id": "node_lookup_products",
+      "name": "Look Up Products",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_cred",
+          "name": "Supabase PostgreSQL"
+        }
+      },
+      "notes": "Full-text search + category + tag match. Returns top 3 results.",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "id": "has_products",
+              "leftValue": "={{ $json.stock }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        }
+      },
+      "id": "node_stock_check",
+      "name": "In Stock?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "notes": "§10.2 Node 2: Checks stock > 0. Out-of-stock path still replies but flags availability."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all product results (may be multiple from Postgres)\nconst allItems = $input.all();\nconst parentData = $('Workflow Input').item?.json ?? {};\n\n// Merge all fetched products into a single context for the AI\nconst products = allItems.map(item => item.json);\nconst inStock  = products.filter(p => p.stock > 0);\n\n// Pass through to AI generation node\nreturn [{\n  json: {\n    products_json:  JSON.stringify(products),\n    in_stock_count: inStock.length,\n    has_products:   products.length > 0,\n    // Forward classifier fields\n    business_id:    parentData.business_id,\n    business_name:  parentData.business_name,\n    intent:         parentData.intent,\n    language:       parentData.language,\n    chatId:         parentData.chatId,\n    phoneNumber:    parentData.phoneNumber,\n    messageText:    parentData.messageText,\n    discount_json:  'null',\n    pricing_json:   'null'\n  }\n}];\n"
+      },
+      "id": "node_prepare_ai_input",
+      "name": "Prepare AI Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        220
+      ],
+      "notes": "Consolidates product results and classifier context for the response-generation AI Agent."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Out-of-stock path — still generate a reply but note unavailability\nconst parentData = $('Workflow Input').item?.json ?? {};\n\nreturn [{\n  json: {\n    products_json:  JSON.stringify([{ name: 'Item', stock: 0, description: 'Currently out of stock' }]),\n    in_stock_count: 0,\n    has_products:   false,\n    business_id:    parentData.business_id,\n    business_name:  parentData.business_name,\n    intent:         parentData.intent,\n    language:       parentData.language,\n    chatId:         parentData.chatId,\n    phoneNumber:    parentData.phoneNumber,\n    messageText:    parentData.messageText,\n    discount_json:  'null',\n    pricing_json:   'null'\n  }\n}];\n"
+      },
+      "id": "node_out_of_stock",
+      "name": "Out of Stock Path",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Gemini's text response\nconst aiText = $input.item.json.candidates?.[0]?.content?.parts?.[0]?.text ?? $input.item.json.candidates?.[0]?.content?.parts?.[0]?.text ?? '';\nconst ctx     = $('Prepare AI Input').item?.json ?? $('Out of Stock Path').item?.json ?? {};\n\nreturn [{\n  json: {\n    replyText:  aiText.trim(),\n    chatId:     ctx.chatId,\n    business_id: ctx.business_id,\n    phoneNumber: ctx.phoneNumber,\n    hasImage:   (JSON.parse(ctx.products_json ?? '[]')[0]?.image_url?.length > 0)\n                  && ctx.in_stock_count > 0,\n    imageUrl:   JSON.parse(ctx.products_json ?? '[]')[0]?.image_url ?? null\n  }\n}];\n"
+      },
+      "id": "node_parse_reply",
+      "name": "Parse AI Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.WAHA_BASE_URL }}/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $env.WAHA_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session",
+              "value": "={{ $env.PILOT_WAHA_SESSION }}"
+            },
+            {
+              "name": "chatId",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.replyText }}"
+            }
+          ]
+        },
+        "options": {
+          "retry": {
+            "enabled": true,
+            "maxRetries": 3,
+            "waitBetweenTries": 2000
+          }
+        },
+        "method": "POST"
+      },
+      "id": "node_send_text",
+      "name": "Send Text Reply (WAHA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        220
+      ],
+      "notes": "§10.2 Node 4: POST /api/sendText to send the reply back to the customer."
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.WAHA_BASE_URL }}/api/sendImage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $env.WAHA_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session",
+              "value": "={{ $env.PILOT_WAHA_SESSION }}"
+            },
+            {
+              "name": "chatId",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "name": "url",
+              "value": "={{ $json.imageUrl }}"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $json.replyText }}"
+            }
+          ]
+        },
+        "options": {
+          "retry": {
+            "enabled": true,
+            "maxRetries": 3,
+            "waitBetweenTries": 2000
+          }
+        },
+        "method": "POST"
+      },
+      "id": "node_send_image",
+      "name": "Send Image + Caption (WAHA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        400
+      ],
+      "notes": "Sends product image with text caption if image_url is set and item is in stock."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversations (business_id, customer_number, direction, message_text)\nVALUES ('{{ $json.business_id }}', '{{ $json.phoneNumber }}', 'outbound', '{{ (typeof $json.replyText === 'string' ? $json.replyText.replace(/'/g, \"''\") : JSON.stringify($json.replyText).replace(/'/g, \"''\")) }}');",
+        "options": {}
+      },
+      "id": "node_log_outbound",
+      "name": "Log Outbound Reply",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_cred",
+          "name": "Supabase PostgreSQL"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {},
+      "id": "node_execute_trigger",
+      "name": "Workflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "id": "node_call_gemini_api",
+      "name": "Call Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/={{ $env.GEMINI_RESPONSE_MODEL }}:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: `You are ${$json.business_name ?? \"\"}'s friendly WhatsApp sales assistant. Reply in the customer's language (${$json.language ?? \"\"}).\n\nTone: warm, concise, like a helpful shop assistant — not corporate, not robotic. Use at most 1–2 relevant emoji.\n\nYou are given:\n- Customer intent: ${$json.intent ?? \"\"}\n- Matched product(s): ${$json.products_json ?? \"\"}\n- Applicable discount (if any): ${$json.discount_json ?? \"\"}\n- Order total (bulk orders only): ${$json.pricing_json ?? \"\"}\n\nFormat rules:\n- Keep replies under 200 words.\n- Always end with one clear next step.\n- Never state a price not in the data you were given.\n- If no matching product found, say so honestly and offer to connect them with the team.\\n\\nCustomer Message: ${$json.messageText ?? \"\"}` }] }] }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Look Up Products": {
+      "main": [
+        [
+          {
+            "node": "In Stock?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "In Stock?": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Out of Stock Path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Input": {
+      "main": [
+        [
+          {
+            "node": "Call Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Out of Stock Path": {
+      "main": [
+        [
+          {
+            "node": "Call Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Text Reply (WAHA)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Image + Caption (WAHA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Text Reply (WAHA)": {
+      "main": [
+        [
+          {
+            "node": "Log Outbound Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Image + Caption (WAHA)": {
+      "main": [
+        [
+          {
+            "node": "Log Outbound Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Input": {
+      "main": [
+        [
+          {
+            "node": "Look Up Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Gemini API": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "error_handler_workflow"
+  },
+  "versionId": "1"
+}

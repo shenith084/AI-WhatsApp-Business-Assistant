@@ -1,0 +1,119 @@
+version: "3.8"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI WhatsApp Business Assistant — Docker Compose
+# n8n (automation) + WAHA (WhatsApp HTTP API)
+# Run: docker compose up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+networks:
+  wa_assistant_net:
+    driver: bridge
+
+volumes:
+  n8n_data:
+  waha_data:
+
+services:
+
+  # ─── WAHA — WhatsApp HTTP API ──────────────────────────────────────────────
+  waha:
+    image: devlikeapro/waha:latest
+    container_name: waha
+    restart: unless-stopped
+    networks:
+      - wa_assistant_net
+    ports:
+      - "3000:3000"          # WAHA dashboard: http://localhost:3000
+    volumes:
+      - waha_data:/app/.waha/sessions
+    environment:
+      # Security — required if WHATSAPP_API_KEY is set
+      WHATSAPP_API_KEY: ${WAHA_API_KEY}
+      # Enable WAHA Plus features if you have the image
+      WAHA_PRINT_QR: "true"
+      # Webhooks will be configured per-session via n8n setup step
+    # Webhooks will be configured per-session via n8n setup step
+
+  # ─── n8n — Workflow Automation Engine ─────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    networks:
+      - wa_assistant_net
+    ports:
+      - "5678:5678"          # n8n UI: http://localhost:5678
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/home/node/.n8n/workflows_import  # auto-import on startup
+    depends_on:
+      - waha
+    environment:
+      # ── n8n core ──
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL}          # public URL for WAHA callbacks
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+
+      # ── Database (n8n's own internal DB — SQLite by default, fine for MVP) ──
+      # Uncomment below to use Postgres for n8n's own metadata too:
+      # DB_TYPE: postgresdb
+      # DB_POSTGRESDB_HOST: ${SUPABASE_DB_HOST}
+      # DB_POSTGRESDB_PORT: 5432
+      # DB_POSTGRESDB_DATABASE: postgres
+      # DB_POSTGRESDB_USER: ${SUPABASE_DB_USER}
+      # DB_POSTGRESDB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+
+      # ── Auth ──
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
+
+      # ── WAHA connection (used inside HTTP Request nodes) ──
+      WAHA_BASE_URL: http://waha:3000
+      WAHA_API_KEY: ${WAHA_API_KEY}
+
+      # ── Google Gemini ──
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_CLASSIFIER_MODEL: ${GEMINI_CLASSIFIER_MODEL:-gemini-1.5-flash-latest}
+      GEMINI_RESPONSE_MODEL: ${GEMINI_RESPONSE_MODEL:-gemini-1.5-flash-latest}
+
+      # ── Supabase / Postgres ──
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_DB_HOST: ${SUPABASE_DB_HOST}
+      SUPABASE_DB_PORT: ${SUPABASE_DB_PORT:-5432}
+      SUPABASE_DB_NAME: ${SUPABASE_DB_NAME:-postgres}
+      SUPABASE_DB_USER: ${SUPABASE_DB_USER}
+      SUPABASE_DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+
+      # ── Brevo (transactional email) ──
+      BREVO_API_KEY: ${BREVO_API_KEY}
+      BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL}
+      BREVO_SENDER_NAME: ${BREVO_SENDER_NAME:-WhatsApp Assistant}
+
+      # ── Cloudinary (product images) ──
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+
+      # ── Business config (pilot demo) ──
+      PILOT_BUSINESS_ID: ${PILOT_BUSINESS_ID}
+      PILOT_WAHA_SESSION: ${PILOT_WAHA_SESSION:-fashion-gallery}
+
+      # ── Logging ──
+      N8N_LOG_LEVEL: info
+      N8N_LOG_OUTPUT: console
+
+      # ── Executions ──
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: "true"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: 168          # 7 days in hours
+
+      # ── Community nodes ──
+      N8N_COMMUNITY_PACKAGES_ENABLED: "true"

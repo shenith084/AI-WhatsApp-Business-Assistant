@@ -1,0 +1,662 @@
+{
+  "name": "01 — Incoming Message Router",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "node_webhook",
+      "name": "WAHA Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "waha-inbound-webhook",
+      "notes": "WAHA posts inbound message events here. Set this URL in WAHA session config: PUT /api/sessions/fashion-gallery with webhooks[0].url = this URL and events: ['message']. Also set hmac.key for signature verification."
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "node_respond_immediately",
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        460,
+        160
+      ],
+      "notes": "Always respond 200 immediately so WAHA doesn't retry. Processing continues in parallel."
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.item.json.body ?? $input.item.json;\n\n// Ignore messages sent by the bot itself\nif (body.payload?.fromMe === true) {\n  return [{ json: { skip: true } }];\n}\n\n// Extract fields\nconst event       = body.event ?? 'message';\nconst sessionName = body.session ?? '';\nconst payload     = body.payload ?? {};\n\nconst fromRaw     = payload.from ?? '';\nconst chatId      = payload.from ?? '';\nconst phoneNumber = fromRaw.replace('@c.us', '').replace('@g.us', '');\nconst messageText = payload.body ?? payload.text ?? '';\nconst timestamp   = payload.timestamp ? new Date(payload.timestamp * 1000).toISOString() : new Date().toISOString();\nconst messageId   = payload.id ? String(payload.id) : `fallback_${timestamp}`;\n\nif (!messageText.trim()) {\n  return [{ json: { skip: true, reason: 'no_text' } }];\n}\n\nreturn [{\n  json: {\n    skip: false,\n    sessionName,\n    phoneNumber,\n    chatId,\n    messageText,\n    messageId,\n    timestamp,\n    event\n  }\n}];"
+      },
+      "id": "node_normalize",
+      "name": "Normalize Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "notes": "Extracts phone, chatId, messageText from WAHA payload. Returns skip=true for bot's own outgoing messages."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "skip_check",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "false"
+              }
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "node_if_skip",
+      "name": "Skip if fromMe",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ],
+      "notes": "If skip=true (message is from the bot itself), stop processing."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id AS business_id, business_name, owner_name, whatsapp_number\nFROM businesses\nWHERE waha_session = '{{ $(\"Normalize Payload\").first().json.sessionName }}' AND status = 'active'\nLIMIT 1;",
+        "options": {}
+      },
+      "id": "node_get_business",
+      "name": "Get Business by Session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_cred",
+          "name": "Supabase PostgreSQL"
+        }
+      },
+      "notes": "Resolves business_id from WAHA session name. If no match, business is unknown — add error handling.",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversations (business_id, customer_number, direction, message_text, waha_message_id)\nVALUES (\n  '{{ $json.business_id }}',\n  '{{ $(\"Normalize Payload\").first().json.phoneNumber }}',\n  'inbound',\n  '{{ $(\"Normalize Payload\").first().json.messageText.replace(/'/g, \"''\") }}',\n  '{{ $(\"Normalize Payload\").first().json.messageId }}'\n)\nRETURNING id AS conversation_id;",
+        "options": {}
+      },
+      "id": "node_log_message",
+      "name": "Log Inbound Message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_cred",
+          "name": "Supabase PostgreSQL"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT direction, message_text, detected_intent, created_at FROM conversations WHERE business_id = '{{ $(\"Get Business by Session\").first().json.business_id }}' AND customer_number = '{{ $(\"Normalize Payload\").first().json.phoneNumber }}' ORDER BY created_at DESC LIMIT 5;",
+        "options": {}
+      },
+      "id": "node_fetch_context",
+      "name": "Fetch Conversation Context",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_cred",
+          "name": "Supabase PostgreSQL"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the context string from last 5 messages for the AI classifier\nconst contextMessages = $input.all();\nconst businessData    = $('Get Business by Session').item.json;\nconst normalized      = $('Normalize Payload').item.json;\n\nconst historyLines = contextMessages\n  .slice(0, 3)   // take last 3 turns\n  .map(m => `[${m.json.direction.toUpperCase()}]: ${m.json.message_text}`)\n  .join('\\n');\n\nreturn [{\n  json: {\n    business_id:   businessData.business_id,\n    business_name: businessData.business_name,\n    phoneNumber:   normalized.phoneNumber,\n    chatId:        normalized.chatId,\n    messageText:   normalized.messageText,\n    contextHistory: historyLines || '(no prior conversation)',\n    prompt: `Business: ${businessData.business_name}\\n\\nConversation history (most recent first):\\n${historyLines || '(no prior conversation)'}\\n\\nCustomer message: ${normalized.messageText}`\n  }\n}];\n"
+      },
+      "id": "node_build_context",
+      "name": "Build AI Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        300
+      ],
+      "notes": "Prepares the conversation context string for the Gemini classifier."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the Gemini classifier JSON response\nconst rawResponse = $input.item.json.candidates?.[0]?.content?.parts?.[0]?.text ?? $input.item.json.candidates?.[0]?.content?.parts?.[0]?.text ?? $input.item.json.content ?? '';\n\nlet classification;\ntry {\n  // Strip markdown code fences if Gemini wrapped the JSON\n  const cleaned = rawResponse.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  classification = JSON.parse(cleaned);\n} catch (e) {\n  // Fallback if parsing fails — treat as low-confidence general question\n  classification = {\n    intent: 'GENERAL_QUESTION',\n    confidence: 0.0,\n    entities: { product_name: null, product_category: null, quantity: null, variant: null, budget: null },\n    language: 'en'\n  };\n}\n\nconst businessData = $('Get Business by Session').item.json;\nconst normalized   = $('Normalize Payload').item.json;\n\nreturn [{\n  json: {\n    ...classification,\n    business_id:   businessData.business_id,\n    business_name: businessData.business_name,\n    phoneNumber:   normalized.phoneNumber,\n    chatId:        normalized.chatId,\n    messageText:   normalized.messageText\n  }\n}];\n"
+      },
+      "id": "node_parse_classification",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE conversations\nSET detected_intent = '{{ $json.intent }}', confidence = {{ $json.confidence || 0 }}\nWHERE business_id = '{{ $(\"Get Business by Session\").first().json.business_id }}' AND customer_number = '{{ $(\"Normalize Payload\").first().json.phoneNumber }}'\n  AND created_at = (SELECT MAX(created_at) FROM conversations WHERE business_id = '{{ $(\"Get Business by Session\").first().json.business_id }}' AND customer_number = '{{ $(\"Normalize Payload\").first().json.phoneNumber }}');",
+        "options": {}
+      },
+      "id": "node_update_intent",
+      "name": "Update Conversation Intent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        2660,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_cred",
+          "name": "Supabase PostgreSQL"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "COMPLAINT",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "human_handoff"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "HUMAN_HANDOFF_REQUEST",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "human_handoff"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.confidence }}",
+                    "rightValue": 0.6,
+                    "operator": {
+                      "type": "number",
+                      "operation": "lt"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "human_handoff"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "BULK_ORDER",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "bulk_order"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "ORDER_CONFIRMATION",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "order_confirmation"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "PRODUCT_INQUIRY",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "product_inquiry"
+            }
+          ]
+        },
+        "fallbackOutput": 4,
+        "options": {}
+      },
+      "id": "node_switch_intent",
+      "name": "Route by Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        2880,
+        300
+      ],
+      "notes": "Routes to the appropriate workflow sub-path. human_handoff wins over everything else (complaint/explicit request/low confidence). product_inquiry is the fallback for inquiry-type intents."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM conversations WHERE waha_message_id = '{{ $json.messageId }}' LIMIT 1;",
+        "options": {}
+      },
+      "id": "node_check_duplicate",
+      "name": "Check Duplicate",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        680,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "supabase_postgres_cred",
+          "name": "Supabase PostgreSQL"
+        }
+      },
+      "notes": "Idempotency check: see if this exact message ID was already processed.",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "id": "has_duplicate",
+              "leftValue": "={{ $json.id ? true : false }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "node_if_duplicate",
+      "name": "Is Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        200
+      ],
+      "notes": "If duplicate, stop and respond 200 OK."
+    },
+    {
+      "parameters": {
+        "workflowId": "O1wPLgkZtz9ct2rE"
+      },
+      "id": "node_call_02",
+      "name": "Call 02 - Product Inquiry Flow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        3200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "z1SklNwQHef8IUEj"
+      },
+      "id": "node_call_03",
+      "name": "Call 03 - Bulk Order Flow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        3200,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "G5bebXQsltmlQPYo"
+      },
+      "id": "node_call_04",
+      "name": "Call 04 - Order Confirmation",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        3200,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "sNLWgVGMaaeTrneE"
+      },
+      "id": "node_call_05",
+      "name": "Call 05 - Human Handoff",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        3200,
+        -100
+      ]
+    },
+    {
+      "id": "node_call_gemini_api",
+      "name": "Call Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2220,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/={{ $env.GEMINI_CLASSIFIER_MODEL }}:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ systemInstruction: { parts: [{ text: \"You are the intent-and-entity extraction layer for {{business_name}}'s WhatsApp sales assistant.\\n\\nGiven the customer's latest message and up to 3 prior turns of conversation history for context, return ONLY a JSON object \\u2014 no prose, no markdown \\u2014 matching this schema:\\n\\n{\\n  \\\"intent\\\": \\\"PRODUCT_INQUIRY | PRICE_CHECK | AVAILABILITY_CHECK | OFFER_REQUEST | BULK_ORDER | DELIVERY_QUESTION | ORDER_CONFIRMATION | COMPLAINT | HUMAN_HANDOFF_REQUEST | GENERAL_QUESTION\\\",\\n  \\\"confidence\\\": <float 0-1>,\\n  \\\"entities\\\": {\\n    \\\"product_name\\\": <string or null>,\\n    \\\"product_category\\\": <string or null>,\\n    \\\"quantity\\\": <integer or null>,\\n    \\\"variant\\\": <string or null>,\\n    \\\"budget\\\": <number or null>\\n  },\\n  \\\"language\\\": \\\"<ISO 639-1 code>\\\"\\n}\\n\\nRules:\\n- A quantity of 10 or more units MUST be classified as BULK_ORDER.\\n- Never invent a product_name not in the message.\\n- If confidence < 0.6, still return best guess; downstream handles escalation.\\n- COMPLAINT always escalates regardless of confidence.\" }] }, contents: [{ parts: [{ text: $json.prompt }] }] }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "WAHA Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 OK",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Payload": {
+      "main": [
+        [
+          {
+            "node": "Skip if fromMe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip if fromMe": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business by Session": {
+      "main": [
+        [
+          {
+            "node": "Log Inbound Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Inbound Message": {
+      "main": [
+        [
+          {
+            "node": "Fetch Conversation Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Conversation Context": {
+      "main": [
+        [
+          {
+            "node": "Build AI Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI Context": {
+      "main": [
+        [
+          {
+            "node": "Call Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Classification": {
+      "main": [
+        [
+          {
+            "node": "Update Conversation Intent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Route by Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Conversation Intent": {
+      "main": [
+        [
+          {
+            "node": "Route by Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Is Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Business by Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Intent": {
+      "main": [
+        [
+          {
+            "node": "Call 05 - Human Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call 03 - Bulk Order Flow",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call 04 - Order Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call 02 - Product Inquiry Flow",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call 02 - Product Inquiry Flow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Gemini API": {
+      "main": [
+        [
+          {
+            "node": "Parse Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "errorWorkflow": "error_handler_workflow"
+  },
+  "staticData": null,
+  "triggerCount": 0,
+  "updatedAt": "2026-08-05T00:00:00.000Z",
+  "versionId": "1"
+}
