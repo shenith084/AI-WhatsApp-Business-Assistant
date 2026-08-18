@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getStaff, addStaff, updateStaff, deleteStaff } from '@/app/actions';
+import { getStaff, addStaff, updateStaff, deleteStaff, getAuthSession } from '@/app/actions';
+import { showAlert, showConfirm, showToast } from '@/app/utils/swal';
 
 export default function StaffPage() {
   const [staff, setStaff] = useState<any[]>([]);
@@ -11,11 +12,16 @@ export default function StaffPage() {
   // Modal state
   const [showModal, setShowModal] = useState(false);
   const [editStaff, setEditStaff] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', email: '', role: 'staff', is_active: true });
+  const [form, setForm] = useState({ name: '', email: '', role: 'staff', password: '', is_active: true });
   const [businessId, setBusinessId] = useState('');
 
   useEffect(() => {
-    fetchStaff();
+    async function init() {
+      const session = await getAuthSession();
+      if (session?.business_id) setBusinessId(session.business_id);
+      fetchStaff();
+    }
+    init();
   }, []);
 
   async function fetchStaff() {
@@ -23,14 +29,13 @@ export default function StaffPage() {
     const { data, error } = await getStaff();
     if (!error && data) {
       setStaff(data);
-      if (data.length > 0) setBusinessId(data[0].business_id);
     }
     setLoading(false);
   }
 
   function openNew() {
     setEditStaff(null);
-    setForm({ name: '', email: '', role: 'staff', is_active: true });
+    setForm({ name: '', email: '', role: 'staff', password: '', is_active: true });
     setShowModal(true);
   }
 
@@ -40,19 +45,19 @@ export default function StaffPage() {
       name: s.name,
       email: s.email,
       role: s.role,
+      password: '', // Don't show existing hash/password
       is_active: s.is_active
     });
-    setBusinessId(s.business_id);
     setShowModal(true);
   }
 
   async function handleSave() {
     if (!form.name || !form.email) {
-      alert("Name and Email are required.");
+      showAlert("Validation Error", "Name and Email are required.", "warning");
       return;
     }
 
-    const payload = {
+    const payload: any = {
       name: form.name,
       email: form.email,
       role: form.role,
@@ -60,21 +65,38 @@ export default function StaffPage() {
       business_id: businessId || '00000000-0000-0000-0000-000000000000'
     };
 
+    if (form.password) {
+      payload.password_hash = form.password; // For MVP, we save plain text.
+    }
+
     if (editStaff) {
       const { error } = await updateStaff(editStaff.id, payload);
-      if (error) alert(error.message);
+      if (error) {
+        showAlert("Error updating staff", error.message);
+      } else {
+        showToast("Staff updated successfully!");
+      }
     } else {
       const { error } = await addStaff(payload);
-      if (error) alert(error.message);
+      if (error) {
+        showAlert("Error adding staff", error.message);
+      } else {
+        showToast("Staff added successfully!");
+      }
     }
+    setSearch('');
     setShowModal(false);
     fetchStaff();
   }
 
   async function handleDelete(id: string) {
-    if (confirm("Are you sure you want to remove this staff member?")) {
+    if (await showConfirm("Remove Staff", "Are you sure you want to remove this staff member?", "Yes, remove them")) {
       const { error } = await deleteStaff(id);
-      if (error) alert(error.message);
+      if (error) {
+        showAlert("Error removing staff", error.message);
+      } else {
+        showToast("Staff member removed!");
+      }
       fetchStaff();
     }
   }
@@ -133,7 +155,9 @@ export default function StaffPage() {
 
       <div className="table-controls">
         <input 
-          type="text" 
+          type="search" 
+          name="staff-search-input-field"
+          autoComplete="new-password"
           className="search-input" 
           style={{ maxWidth: '800px', width: '100%' }}
           placeholder="🔍 Search by name or email..." 
@@ -195,7 +219,9 @@ export default function StaffPage() {
                   <td>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button className="btn-icon" onClick={() => openEdit(s)}>✏️</button>
-                      <button className="btn-icon" onClick={() => handleDelete(s.id)} style={{ color: 'var(--color-danger-text)' }}>🗑️</button>
+                      {s.role !== 'platform_super_admin' && (
+                        <button className="btn-icon" onClick={() => handleDelete(s.id)} style={{ color: 'var(--color-danger-text)' }}>🗑️</button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -221,6 +247,10 @@ export default function StaffPage() {
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Email Address *</label>
                 <input className="form-input" type="email" value={form.email} onChange={e=>setForm({...form, email: e.target.value})} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Password {editStaff ? '(Leave blank to keep current)' : '*'}</label>
+                <input className="form-input" type="password" placeholder="••••••••" value={form.password} onChange={e=>setForm({...form, password: e.target.value})} />
               </div>
               <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
                 <div className="form-group" style={{ marginBottom: 0 }}>

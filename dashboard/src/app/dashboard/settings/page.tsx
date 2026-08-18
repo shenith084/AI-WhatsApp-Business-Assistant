@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { getSettings, updateSettings } from '@/app/actions';
+import { showAlert, showToast } from '@/app/utils/swal';
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(false);
@@ -56,13 +57,14 @@ export default function SettingsPage() {
       
       if (!error) {
         setSuccess(true);
+        showToast("Settings saved successfully!");
         setTimeout(() => setSuccess(false), 3000);
       } else {
-        alert("Error saving settings: " + JSON.stringify(error));
+        showAlert("Error saving settings", JSON.stringify(error));
       }
     } catch (err: any) {
       setLoading(false);
-      alert("Error saving settings: " + err.message);
+      showAlert("Error saving settings", err.message);
     }
   };
 

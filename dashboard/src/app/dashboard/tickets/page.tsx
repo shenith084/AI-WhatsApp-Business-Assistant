@@ -1,36 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-
-const DEMO_TICKETS = [
-  {
-    id: 'TKT-001', customer: '+94771234560', reason: 'complaint', status: 'open',
-    created_at: '2026-08-05T06:10:00Z',
-    suggested_reply: 'I am so sorry to hear about the delay. I am checking the status of your order right now and will get back to you in a few minutes with an update.',
-    chat_snapshot: [
-      { direction: 'inbound', text: 'Where is my order? It was supposed to be here yesterday.', intent: 'DELIVERY_QUESTION', confidence: 0.9, at: '2026-08-05T06:05:00Z' },
-      { direction: 'outbound', text: 'Our records show it is out for delivery today. Would you like me to connect you with the driver?', at: '2026-08-05T06:05:05Z' },
-      { direction: 'inbound', text: 'This is the second time my order arrived late, I am really unhappy.', intent: 'COMPLAINT', confidence: 0.95, at: '2026-08-05T06:10:00Z' },
-      { direction: 'outbound', text: 'I am really sorry to hear that! 🙏 I am connecting you with our team right now — they will reply to you shortly and make sure this is sorted out.', at: '2026-08-05T06:10:05Z' }
-    ]
-  },
-  {
-    id: 'TKT-002', customer: '+94769876500', reason: 'customer_request', status: 'in_progress',
-    created_at: '2026-08-05T05:30:00Z', assigned: 'Ashan Perera',
-    suggested_reply: 'Hi! Yes, we can do a mix of colors for your bulk order. How many of each color would you like?',
-    chat_snapshot: [
-      { direction: 'inbound', text: 'Can I talk to someone please?', intent: 'HUMAN_HANDOFF_REQUEST', confidence: 0.98, at: '2026-08-05T05:30:00Z' }
-    ]
-  },
-  {
-    id: 'TKT-003', customer: '+94712345600', reason: 'low_confidence', status: 'open',
-    created_at: '2026-08-05T04:15:00Z',
-    suggested_reply: 'Hello! It looks like you have a question. Could you provide a bit more detail so I can help you best?',
-    chat_snapshot: [
-      { direction: 'inbound', text: 'uuuhh idk maybe some blue thing?', intent: 'GENERAL_QUESTION', confidence: 0.3, at: '2026-08-05T04:15:00Z' }
-    ]
-  }
-];
+import { useEffect, useState } from 'react';
+import { showToast } from '@/app/utils/swal';
+import { getTickets, updateTicketStatus, getAuthSession } from '@/app/actions';
 
 const STATUS_BADGE: Record<string, string> = {
   open: 'badge-danger', in_progress: 'badge-warning', resolved: 'badge-success'
@@ -41,30 +13,66 @@ const REASON_LABELS: Record<string, string> = {
 };
 
 export default function TicketsPage() {
-  const [tickets, setTickets] = useState(DEMO_TICKETS);
+  const [tickets, setTickets] = useState<any[]>([]);
   const [filterStatus, setFilterStatus] = useState('all');
-  const [selected, setSelected] = useState<typeof DEMO_TICKETS[0] | null>(null);
+  const [selected, setSelected] = useState<any | null>(null);
   const [replyText, setReplyText] = useState('');
+  const [user, setUser] = useState<any>(null);
+
+  async function fetchTickets() {
+    const { data } = await getTickets();
+    if (data) setTickets(data);
+  }
+
+  useEffect(() => {
+    async function init() {
+      const session = await getAuthSession();
+      setUser(session);
+      fetchTickets();
+    }
+    init();
+  }, []);
 
   const filtered = tickets.filter(t => filterStatus === 'all' || t.status === filterStatus);
 
-  function openTicket(t: typeof DEMO_TICKETS[0]) {
+  function openTicket(t: any) {
     setSelected(t);
-    setReplyText(t.suggested_reply);
+    setReplyText(t.suggested_reply || '');
   }
 
-  function handleResolve() {
+  async function handleResolve() {
     if (!selected) return;
-    setTickets(prev => prev.map(t => t.id === selected.id ? { ...t, status: 'resolved' } : t));
+    await updateTicketStatus(selected.id, 'resolved');
+    fetchTickets();
     setSelected(null);
+    showToast('Ticket marked as resolved!', 'success');
   }
 
-  function handleSendReply() {
+  async function handleTakeOver(t: any) {
+    if (t.status === 'open') {
+      await updateTicketStatus(t.id, 'in_progress', user?.name || 'Agent');
+      showToast('You have taken over this ticket', 'info');
+      fetchTickets();
+    }
+    openTicket(t);
+  }
+
+  async function handleSendReply() {
     if (!selected || !replyText) return;
     // In production: send to WAHA HTTP endpoint
-    alert(`Message sent to ${selected.customer}:\n\n${replyText}`);
-    setTickets(prev => prev.map(t => t.id === selected.id ? { ...t, status: 'in_progress', assigned: 'Ashan Perera' } : t));
+    await updateTicketStatus(selected.id, 'in_progress', user?.name || 'Agent');
+    showToast(`Message sent to ${selected.customer_number}!`, 'success', replyText);
+    fetchTickets();
     setSelected(null);
+  }
+
+  let chatSnapshotArray = [];
+  if (selected?.chat_snapshot) {
+    if (typeof selected.chat_snapshot === 'string') {
+      try { chatSnapshotArray = JSON.parse(selected.chat_snapshot); } catch (e) {}
+    } else if (Array.isArray(selected.chat_snapshot)) {
+      chatSnapshotArray = selected.chat_snapshot;
+    }
   }
 
   return (
@@ -112,14 +120,14 @@ export default function TicketsPage() {
               )}
               {filtered.map(t => (
                 <tr key={t.id}>
-                  <td className="strong" style={{ fontFamily:'var(--font-mono)' }}>{t.id}</td>
-                  <td className="strong">{t.customer}</td>
+                  <td className="strong" style={{ fontFamily:'var(--font-mono)' }}>{t.id.substring(0, 8).toUpperCase()}</td>
+                  <td className="strong">{t.customer_number}</td>
                   <td>{REASON_LABELS[t.reason] ?? t.reason}</td>
                   <td><span className={`badge ${STATUS_BADGE[t.status]}`}>{t.status.replace('_',' ')}</span></td>
                   <td style={{ fontSize:'13px' }}>{t.assigned ?? <span style={{color:'var(--color-text-muted)'}}>Unassigned</span>}</td>
                   <td style={{ fontSize:'12px', color:'var(--color-text-muted)' }}>{new Date(t.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
                   <td>
-                    <button id={`open-ticket-${t.id}`} className={`btn ${t.status==='open' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={()=>openTicket(t)}>
+                    <button id={`open-ticket-${t.id}`} className={`btn ${t.status==='open' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={()=>handleTakeOver(t)}>
                       {t.status === 'open' ? 'Take Over' : 'View'}
                     </button>
                   </td>
@@ -133,21 +141,27 @@ export default function TicketsPage() {
       {/* Ticket Modal */}
       {selected && (
         <div className="modal-overlay" onClick={()=>setSelected(null)}>
-          <div className="modal" style={{ maxWidth: '800px', display:'flex', gap:'24px' }} onClick={e=>e.stopPropagation()}>
+          <div className="modal" style={{ maxWidth: '600px', padding: '32px', display:'flex', flexDirection: 'column', gap:'16px' }} onClick={e=>e.stopPropagation()}>
             
-            {/* Left: Chat History */}
-            <div style={{ flex: 1, display:'flex', flexDirection:'column' }}>
-              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'16px' }}>
+            {/* Header */}
+            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'16px' }}>
                 <div>
-                  <h2 className="modal-title" style={{ marginBottom:'4px' }}>Ticket {selected.id}</h2>
-                  <div style={{ fontSize:'13px', color:'var(--color-text-muted)' }}>{selected.customer}</div>
+                  <h2 className="modal-title" style={{ marginBottom:'4px' }}>Ticket {selected.id.substring(0, 8).toUpperCase()}</h2>
+                  <div style={{ fontSize:'13px', color:'var(--color-text-muted)' }}>{selected.customer_number}</div>
                 </div>
                 <div><span className={`badge ${STATUS_BADGE[selected.status]}`}>{selected.status.replace('_',' ')}</span></div>
               </div>
+              
+              {/* Reason */}
+              <div style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'12px', padding:'12px 16px' }}>
+                <div style={{ fontSize:'12px', color:'var(--color-text-muted)', marginBottom:'4px', textTransform:'uppercase', fontWeight:600 }}>Handoff Reason</div>
+                <div style={{ fontSize:'14px', color:'var(--color-text-primary)' }}>{REASON_LABELS[selected.reason]}</div>
+              </div>
 
-              <div style={{ background:'rgba(0,0,0,0.2)', border:'1px solid var(--color-border)', borderRadius:'12px', padding:'16px', flex:1, overflowY:'auto', maxHeight:'400px', display:'flex', flexDirection:'column', gap:'12px' }}>
+              {/* Chat History */}
+              <div style={{ background:'#efeae2', border:'1px solid var(--color-border)', borderRadius:'12px', padding:'16px', overflowY:'auto', maxHeight:'250px', display:'flex', flexDirection:'column', gap:'12px' }}>
                 <div style={{ fontSize:'11px', textAlign:'center', color:'var(--color-text-muted)', marginBottom:'8px' }}>AI Context Snapshot</div>
-                {selected.chat_snapshot.map((msg, i) => (
+                {chatSnapshotArray.map((msg: any, i: number) => (
                   <div key={i} style={{ alignSelf: msg.direction === 'inbound' ? 'flex-start' : 'flex-end', maxWidth:'80%' }}>
                     {msg.direction === 'inbound' && msg.intent && (
                       <div style={{ fontSize:'10px', color:'var(--color-text-muted)', marginBottom:'4px', marginLeft:'4px' }}>
@@ -155,54 +169,57 @@ export default function TicketsPage() {
                       </div>
                     )}
                     <div style={{
-                      background: msg.direction === 'inbound' ? 'var(--color-bg-card)' : 'var(--color-accent-dark)',
-                      color: '#fff', padding:'10px 14px', borderRadius:'14px',
-                      borderBottomLeftRadius: msg.direction === 'inbound' ? '4px' : '14px',
-                      borderBottomRightRadius: msg.direction === 'outbound' ? '4px' : '14px',
-                      fontSize:'14px'
+                      background: msg.direction === 'inbound' ? '#ffffff' : '#dcf8c6',
+                      color: '#111b21',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                      padding:'8px 12px', borderRadius:'8px',
+                      borderTopLeftRadius: msg.direction === 'inbound' ? '0px' : '8px',
+                      borderTopRightRadius: msg.direction === 'outbound' ? '0px' : '8px',
+                      fontSize:'14px',
+                      wordBreak: 'break-word'
                     }}>
                       {msg.text}
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
-
-            {/* Right: Actions & Reply */}
-            <div style={{ width: '320px', display:'flex', flexDirection:'column', gap:'16px' }}>
-              <div style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'12px', padding:'16px' }}>
-                <div style={{ fontSize:'12px', color:'var(--color-text-muted)', marginBottom:'4px', textTransform:'uppercase', fontWeight:600 }}>Handoff Reason</div>
-                <div style={{ fontSize:'14px', color:'var(--color-text-primary)' }}>{REASON_LABELS[selected.reason]}</div>
-              </div>
-
-              <div style={{ flex:1, display:'flex', flexDirection:'column' }}>
+              {/* Reply Area */}
+              <div style={{ display:'flex', flexDirection:'column' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
-                  <label className="form-label">Send Reply to Customer</label>
+                  <label className="form-label">Draft WhatsApp Reply</label>
                   <span className="badge badge-accent">AI Suggested</span>
                 </div>
                 <textarea
                   id="ticket-reply-text"
                   className="form-textarea"
-                  style={{ flex:1, minHeight:'150px' }}
+                  style={{ minHeight:'80px' }}
                   value={replyText}
                   onChange={e => setReplyText(e.target.value)}
                 />
               </div>
 
-              <div style={{ display:'flex', gap:'8px', flexDirection:'column' }}>
-                <button id="send-reply-btn" className="btn btn-primary" onClick={handleSendReply} style={{ justifyContent:'center' }}>
-                  Send & Mark In Progress
+              <div style={{ display:'flex', gap:'12px', marginTop: '8px' }}>
+                <button 
+                  className="btn" 
+                  style={{ flex: 2, background: '#25D366', color: 'white', justifyContent: 'center', border: 'none', fontSize: '15px', fontWeight: 600 }}
+                  onClick={() => {
+                    // Extract only the digits for wa.me link
+                    const phone = selected.customer_number.replace(/\D/g, '');
+                    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(replyText)}`, '_blank');
+                    handleSendReply();
+                  }}
+                >
+                  💬 Connect on WhatsApp
                 </button>
                 {selected.status !== 'resolved' && (
-                  <button id="resolve-ticket-btn" className="btn btn-secondary" onClick={handleResolve} style={{ justifyContent:'center' }}>
-                    ✓ Mark as Resolved
+                  <button id="resolve-ticket-btn" className="btn btn-secondary" onClick={handleResolve} style={{ flex: 1, justifyContent:'center' }}>
+                    ✓ Resolve
                   </button>
                 )}
-                <button className="btn btn-secondary" onClick={()=>setSelected(null)} style={{ justifyContent:'center', background:'transparent', border:'none' }}>
+                <button className="btn btn-secondary" onClick={()=>setSelected(null)} style={{ flex: 1, justifyContent:'center', background:'transparent', border:'none' }}>
                   Cancel
                 </button>
               </div>
-            </div>
 
           </div>
         </div>

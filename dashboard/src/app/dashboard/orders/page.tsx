@@ -2,14 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { getOrders, updateOrderStatus } from '@/app/actions';
+import { showAlert, showToast } from '@/app/utils/swal';
 
 const STATUS_BADGE: Record<string, string> = {
   'pending': 'badge-gray',
-  'processing': 'badge-warning',
-  'confirmed': 'badge-success',
-  'shipped': 'badge-success',
-  'out_for_delivery': 'badge-purple',
-  'delivered': 'badge-success',
+  'confirmed': 'badge-warning',
+  'fulfilled': 'badge-success',
   'cancelled': 'badge-danger'
 };
 
@@ -54,8 +52,9 @@ export default function OrdersPage() {
     if (!editOrder || !newStatus) return;
     const { error } = await updateOrderStatus(editOrder.id, newStatus);
     if (error) {
-      alert(error.message);
+      showAlert("Error updating status", error.message);
     } else {
+      showToast("Order status updated successfully!");
       fetchOrders();
       setShowModal(false);
     }
@@ -80,8 +79,8 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' }}>
-        {['All Orders', 'Pending', 'Processing', 'Confirmed', 'Shipped', 'Delivered', 'Cancelled'].map(s => {
+      <div className="filter-tabs">
+        {['All Orders', 'Pending', 'Confirmed', 'Fulfilled', 'Cancelled'].map(s => {
           const count = s === 'All Orders' ? orders.length : orders.filter(x => x.status && x.status.toLowerCase() === s.toLowerCase()).length;
           const isActive = filterStatus === s;
           return (
@@ -165,7 +164,7 @@ export default function OrdersPage() {
                   <td style={{ fontWeight: 600 }}>LKR {(o.total_price).toLocaleString()}</td>
                   <td><span className={`badge ${STATUS_BADGE[o.status] || 'badge-gray'}`} style={{ textTransform: 'capitalize' }}>{o.status?.replace('_', ' ')}</span></td>
                   <td>
-                    <button className="btn-secondary btn-sm" onClick={() => openEdit(o)}>Update Status</button>
+                    <button className="btn-secondary btn-sm" onClick={() => openEdit(o)}>View Details</button>
                   </td>
                 </tr>
               );
@@ -177,33 +176,96 @@ export default function OrdersPage() {
       {/* Order Modal */}
       {showModal && editOrder && (
         <div className="modal-overlay" onClick={()=>setShowModal(false)}>
-          <div className="modal" onClick={e=>e.stopPropagation()} style={{ maxWidth: '400px' }}>
-            <div className="modal-header">
-              <h2 className="modal-title">Update Order Status</h2>
-              <button className="modal-close" onClick={()=>setShowModal(false)}>✕</button>
-            </div>
-            <div style={{ padding: '0 32px 32px 32px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              <div style={{ fontSize: '14px', color: 'var(--color-text-main)', padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
-                <div style={{ marginBottom: '4px' }}><strong style={{ color: 'var(--color-text-muted)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Order ID:</strong> {editOrder.id.substring(0, 8).toUpperCase()}</div>
-                <div><strong style={{ color: 'var(--color-text-muted)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Customer:</strong> {editOrder.customer_number}</div>
+          <div className="modal" onClick={e=>e.stopPropagation()} style={{ maxWidth: '650px', padding: '32px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <h2 className="modal-title" style={{ marginBottom: '4px' }}>Order {editOrder.id.substring(0, 8).toUpperCase()}</h2>
+                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                  Placed on {new Date(editOrder.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </div>
               </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Order Status</label>
+              <button className="btn-icon" onClick={()=>setShowModal(false)}>✕</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid var(--color-border)' }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Customer Info</div>
+                <div style={{ fontWeight: 600, fontSize: '15px', color: 'var(--color-text-main)', marginBottom: '2px' }}>
+                  {editOrder.customers?.name || 'Guest'}
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>{editOrder.customer_number}</div>
+              </div>
+              <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid var(--color-border)' }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Order Summary</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '13px' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>Payment Method</span>
+                  <span style={{ fontWeight: 500 }}>
+                    {editOrder.payment_method === 'cod' ? 'Cash on Delivery' : 
+                     editOrder.payment_method === 'card' ? 'Credit Card' : 
+                     (editOrder.payment_method || 'N/A').toUpperCase()}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--color-border)' }}>
+                  <span style={{ fontWeight: 600 }}>Total Price</span>
+                  <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>LKR {(editOrder.total_price || 0).toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '12px' }}>Order Items</div>
+              <div style={{ border: '1px solid var(--color-border)', borderRadius: '12px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead style={{ background: '#f1f5f9', borderBottom: '1px solid var(--color-border)' }}>
+                    <tr>
+                      <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-muted)' }}>Product</th>
+                      <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--color-text-muted)' }}>Qty</th>
+                      <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text-muted)' }}>Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      let items = [];
+                      try {
+                        items = typeof editOrder.items === 'string' ? JSON.parse(editOrder.items) : editOrder.items || [];
+                      } catch (e) {
+                        items = [];
+                      }
+                      if (!Array.isArray(items) || items.length === 0) {
+                        return <tr><td colSpan={3} style={{ padding: '16px', textAlign: 'center', color: 'var(--color-text-muted)' }}>No items found</td></tr>;
+                      }
+                      return items.map((item: any, idx: number) => {
+                        const qty = item.qty || item.quantity || 1;
+                        const price = item.unit_price || item.price || 0;
+                        return (
+                          <tr key={idx} style={{ borderBottom: idx === items.length - 1 ? 'none' : '1px solid var(--color-border)' }}>
+                            <td style={{ padding: '12px 16px', fontWeight: 500 }}>{item.product_name || item.name || 'Unknown Item'}</td>
+                            <td style={{ padding: '12px 16px', textAlign: 'center' }}>x{qty}</td>
+                            <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 500 }}>LKR {(price * qty).toLocaleString()}</td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '16px', paddingTop: '16px', borderTop: '1px solid var(--color-border)', marginTop: '8px' }}>
+              <div className="form-group" style={{ marginBottom: 0, flex: 2 }}>
+                <label className="form-label" style={{ marginBottom: '6px' }}>Update Order Status</label>
                 <select className="form-input form-select" value={newStatus} onChange={e=>setNewStatus(e.target.value)}>
                   <option value="pending">Pending</option>
-                  <option value="processing">Processing</option>
                   <option value="confirmed">Confirmed</option>
-                  <option value="shipped">Shipped</option>
-                  <option value="out_for_delivery">Out for Delivery</option>
-                  <option value="delivered">Delivered</option>
+                  <option value="fulfilled">Fulfilled</option>
                   <option value="cancelled">Cancelled</option>
                 </select>
               </div>
-              <div className="modal-footer" style={{ marginTop: '16px', padding: '24px 0 0 0', display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--color-border)' }}>
-                <button className="btn btn-secondary" onClick={()=>setShowModal(false)}>Cancel</button>
-                <button className="btn btn-primary" onClick={handleSaveStatus}>Save Status</button>
-              </div>
+              <button className="btn btn-primary" style={{ flex: 1, padding: '12px', justifyContent: 'center' }} onClick={handleSaveStatus}>
+                Save Changes
+              </button>
             </div>
+
           </div>
         </div>
       )}

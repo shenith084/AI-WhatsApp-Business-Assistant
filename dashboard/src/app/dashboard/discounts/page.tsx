@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getDiscounts, addDiscountRule, updateDiscountRule, deleteDiscountRule, getSettings } from '@/app/actions';
+import { getDiscounts, addDiscountRule, updateDiscountRule, deleteDiscountRule, getAuthSession } from '@/app/actions';
+import { showAlert, showConfirm, showToast } from '@/app/utils/swal';
 
 export default function DiscountsPage() {
   const [rules, setRules] = useState<any[]>([]);
@@ -13,7 +14,12 @@ export default function DiscountsPage() {
   const [businessId, setBusinessId] = useState('');
 
   useEffect(() => {
-    fetchRules();
+    async function init() {
+      const session = await getAuthSession();
+      if (session?.business_id) setBusinessId(session.business_id);
+      fetchRules();
+    }
+    init();
   }, []);
 
   async function fetchRules() {
@@ -21,7 +27,6 @@ export default function DiscountsPage() {
     const { data, error } = await getDiscounts();
     if (!error && data) {
       setRules(data);
-      if (data.length > 0) setBusinessId(data[0].business_id);
     }
     setLoading(false);
   }
@@ -45,13 +50,17 @@ export default function DiscountsPage() {
       valid_to: r.valid_to || '',
       is_active: r.is_active !== false
     });
-    setBusinessId(r.business_id);
     setShowModal(true);
   }
 
   async function handleSave() {
     if (!form.rule_name || !form.min_quantity || !form.discount_value) {
-      alert("Name, Min Qty, and Discount Value are required.");
+      showAlert("Validation Error", "Name, Min Qty, and Discount Value are required.", "warning");
+      return;
+    }
+
+    if (form.max_quantity && parseInt(form.max_quantity) < parseInt(form.min_quantity)) {
+      showAlert("Validation Error", "Max Quantity cannot be less than Min Quantity.", "warning");
       return;
     }
 
@@ -70,10 +79,18 @@ export default function DiscountsPage() {
 
     if (editRule) {
       const { error } = await updateDiscountRule(editRule.id, payload);
-      if (error) alert(error.message);
+      if (error) {
+        showAlert("Error updating rule", error.message);
+      } else {
+        showToast("Discount rule updated successfully!");
+      }
     } else {
       const { error } = await addDiscountRule(payload);
-      if (error) alert(error.message);
+      if (error) {
+        showAlert("Error adding rule", error.message);
+      } else {
+        showToast("Discount rule added successfully!");
+      }
     }
     setShowModal(false);
     fetchRules();
@@ -85,24 +102,18 @@ export default function DiscountsPage() {
   }
 
   async function handleDelete(id: string) {
-    if (confirm("Are you sure you want to delete this rule?")) {
+    if (await showConfirm("Delete Rule", "Are you sure you want to delete this discount rule?", "Yes, delete it")) {
       const { error } = await deleteDiscountRule(id);
-      if (error) alert(error.message);
+      if (error) {
+        showAlert("Error deleting rule", error.message);
+      } else {
+        showToast("Discount rule deleted!");
+      }
       fetchRules();
     }
   }
 
-  // Live pricing simulator
-  const [simQty, setSimQty] = useState(25);
-  const [simCat, setSimCat] = useState('');
-  
-  // Best rule logic
-  const bestRule = rules.filter(r => 
-    r.is_active !== false && 
-    r.min_quantity <= simQty && 
-    (!r.max_quantity || r.max_quantity >= simQty) && 
-    (!r.product_category || r.product_category === simCat || simCat === '')
-  ).sort((a,b) => b.discount_value - a.discount_value)[0];
+
 
   return (
     <>
@@ -167,55 +178,6 @@ export default function DiscountsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
-        </div>
-
-        {/* Pricing Simulator */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">🧮 Pricing Simulator</span>
-          </div>
-          <div style={{ display:'flex', flexDirection:'column', gap:'16px' }}>
-            <div className="form-group">
-              <label className="form-label">Quantity</label>
-              <input id="sim-qty" className="form-input" type="number" value={simQty} onChange={e=>setSimQty(parseInt(e.target.value)||0)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Category (optional)</label>
-              <select id="sim-cat" className="form-select" value={simCat} onChange={e=>setSimCat(e.target.value)}>
-                <option value="">Any Category</option>
-                <option value="tshirt">T-Shirt</option>
-                <option value="dress">Dress</option>
-                <option value="trousers">Trousers</option>
-                <option value="jacket">Jacket</option>
-                <option value="accessories">Accessories</option>
-              </select>
-            </div>
-            {bestRule ? (
-              <div style={{ background:'var(--color-accent-glow)', border:'1px solid rgba(37,211,102,0.2)', borderRadius:'12px', padding:'16px' }}>
-                <div style={{ fontSize:'12px', color:'var(--color-text-muted)', marginBottom:'8px' }}>Best Rule Applied</div>
-                <div style={{ fontSize:'16px', fontWeight:700, color:'var(--color-accent)', marginBottom:'4px' }}>{bestRule.rule_name}</div>
-                <div style={{ fontSize:'14px', color:'var(--color-text-secondary)' }}>
-                  {bestRule.discount_type === 'percentage' ? `${bestRule.discount_value}% discount` : `Fixed $${bestRule.discount_value}/item`}
-                </div>
-              </div>
-            ) : (
-              <div style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'12px', padding:'16px', fontSize:'13px', color:'var(--color-danger)' }}>
-                No discount rule applies for qty {simQty}{simCat ? ` + ${simCat}` : ''}.
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Info Card */}
-        <div className="card">
-          <div className="card-header"><span className="card-title">ℹ️ How Rules Work</span></div>
-          <div style={{ display:'flex', flexDirection:'column', gap:'12px', fontSize:'13px', color:'var(--color-text-secondary)' }}>
-            <div>✅ <strong style={{color:'var(--color-text-primary)'}}>Best rule wins</strong> — only the highest-value applicable rule is applied. Rules never stack.</div>
-            <div>📦 <strong style={{color:'var(--color-text-primary)'}}>Quantity range</strong> — rule applies when order qty falls between min and max (inclusive).</div>
-            <div>🏷️ <strong style={{color:'var(--color-text-primary)'}}>Category-specific</strong> rules take priority over "all categories" rules at the same discount level.</div>
-            <div>📅 <strong style={{color:'var(--color-text-primary)'}}>Validity dates</strong> — rule is ignored outside its valid_from / valid_to window.</div>
-            <div>💰 <strong style={{color:'var(--color-text-primary)'}}>fixed_price</strong> overrides the unit price per item.</div>
           </div>
         </div>
       </div>

@@ -1,134 +1,149 @@
 'use client';
 
-import { useState } from 'react';
-
-const ROLES = [
-  { id: 'r1', name: 'Super Admin', users: 1, desc: 'Full access to all features and settings.', color: 'badge-danger' },
-  { id: 'r2', name: 'Admin',       users: 1, desc: 'Manage almost everything except role & permission.', color: 'badge-purple' },
-  { id: 'r3', name: 'Staff',       users: 0, desc: 'Can manage orders, products and customers.', color: 'badge-gray' },
-  { id: 'r4', name: 'test',        users: 0, desc: 'for test', color: 'badge-gray' },
-];
+import { useState, useEffect } from 'react';
+import { getPermissions, updatePermission } from '@/app/actions';
 
 export default function RolesPage() {
-  const [activeRole, setActiveRole] = useState(ROLES[0]);
+  const [permissions, setPermissions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchPermissions();
+  }, []);
+
+  async function fetchPermissions() {
+    setLoading(true);
+    const { data, error } = await getPermissions();
+    if (!error && data) {
+      setPermissions(data);
+    }
+    setLoading(false);
+  }
+
+  async function togglePermission(id: string, field: string, currentValue: boolean) {
+    setSaving(id);
+    
+    // Optimistic update in UI
+    setPermissions(prev => prev.map(p => 
+      p.id === id ? { ...p, [field]: !currentValue } : p
+    ));
+
+    // Send to DB
+    const { error } = await updatePermission(id, { [field]: !currentValue });
+    if (error) {
+      const { showAlert } = await import('@/app/utils/swal');
+      showAlert("Error", "Failed to update permission: " + error.message, "error");
+      // Revert if error (lazy reload)
+      fetchPermissions();
+    }
+    setSaving(null);
+  }
+
+  // Define the columns/permissions we want to display
+  const permissionFields = [
+    { key: 'can_view_orders', label: 'View Orders' },
+    { key: 'can_edit_orders', label: 'Edit Orders' },
+    { key: 'can_view_products', label: 'View Products' },
+    { key: 'can_edit_products', label: 'Edit Products' },
+    { key: 'can_manage_discounts', label: 'Discounts' },
+    { key: 'can_manage_staff', label: 'Manage Staff' },
+    { key: 'can_handle_tickets', label: 'Support Tickets' }
+  ];
 
   return (
     <>
-      <div className="page-header" style={{ marginBottom: '32px' }}>
+      <div className="page-header">
         <div>
-          <h1 className="page-title">Roles</h1>
-          <div className="breadcrumb" style={{ color: 'var(--color-text-main)' }}>Manage user roles and their permissions.</div>
+          <h1 className="page-title">Roles & Permissions</h1>
+          <div className="breadcrumb">Dashboard &gt; Roles & Permissions</div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '32px' }}>
-        
-        {/* Left Column - Roles List */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {ROLES.map(r => {
-            const isActive = activeRole.id === r.id;
-            return (
-              <div 
-                key={r.id}
-                onClick={() => setActiveRole(r)}
-                style={{ 
-                  padding: '20px', 
-                  background: isActive ? '#fef2f2' : 'white', 
-                  border: `1px solid ${isActive ? '#fecaca' : 'var(--color-border)'}`,
-                  borderRadius: '16px',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                  boxShadow: isActive ? '0 4px 6px -1px rgba(220, 38, 38, 0.05)' : 'var(--shadow-sm)'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <div style={{ fontWeight: 700, fontSize: '15px' }}>{r.name}</div>
-                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>{r.users} Users</div>
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
-                  {r.desc}
-                </div>
-              </div>
-            );
-          })}
-          
-          <button className="btn" style={{ background: 'white', border: '1px solid var(--color-border)', color: 'var(--color-text-main)', padding: '16px', borderRadius: '16px', marginTop: '8px' }}>
-            + Add New Role
-          </button>
+      <div className="card" style={{ padding: 0 }}>
+        <div style={{ padding: '24px', borderBottom: '1px solid var(--color-border)' }}>
+          <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-text-main)' }}>Global Role Assignments</h2>
+          <p style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+            Toggle features on or off for the standard system roles. Changes take effect instantly for all active sessions.
+          </p>
         </div>
 
-        {/* Right Column - Permissions */}
-        <div className="card" style={{ padding: '32px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
-            <div>
-              <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '4px' }}>Permissions for {activeRole.name}</h2>
-              <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>{activeRole.desc}</div>
-            </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)' }}>
-              <input type="checkbox" checked={true} readOnly />
-              Select All
-            </label>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            
-            {/* Catalog */}
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: '16px' }}>Catalog</div>
-              <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                  <input type="checkbox" checked={true} readOnly /> View Products
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                  <input type="checkbox" checked={true} readOnly /> Edit Details
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                  <input type="checkbox" checked={true} readOnly /> Edit Price
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                  <input type="checkbox" checked={true} readOnly /> Edit Stock
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                  <input type="checkbox" checked={true} readOnly /> Delete Products
-                </label>
-              </div>
-            </div>
-
-            {/* Sales & Orders */}
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: '16px' }}>Sales & Orders</div>
-              <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                  <input type="checkbox" checked={true} readOnly /> View Orders
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                  <input type="checkbox" checked={true} readOnly /> View Financials
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                  <input type="checkbox" checked={true} readOnly /> Update Status
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                  <input type="checkbox" checked={true} readOnly /> Cancel Orders
-                </label>
-              </div>
-            </div>
-
-            {/* Customers & Wholesale */}
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: '16px' }}>Customers & Wholesale</div>
-              <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                  <input type="checkbox" checked={true} readOnly /> View Customers
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                  <input type="checkbox" checked={true} readOnly /> View Wholesale
-                </label>
-              </div>
-            </div>
-
-          </div>
+        <div className="table-wrapper" style={{ border: 'none' }}>
+          <table style={{ width: '100%', minWidth: '800px' }}>
+            <thead>
+              <tr>
+                <th style={{ width: '200px' }}>SYSTEM ROLE</th>
+                {permissionFields.map(field => (
+                  <th key={field.key} style={{ textAlign: 'center' }}>{field.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={permissionFields.length + 1} style={{ textAlign: 'center', padding: '40px' }}>Loading permissions...</td></tr>
+              ) : permissions.length === 0 ? (
+                <tr><td colSpan={permissionFields.length + 1} style={{ textAlign: 'center', padding: '40px' }}>No roles defined in the database.</td></tr>
+              ) : permissions.map(role => {
+                const isSuperAdmin = role.role === 'platform_super_admin';
+                return (
+                  <tr key={role.id}>
+                    <td>
+                      <div style={{ fontWeight: 600, color: 'var(--color-text-main)', textTransform: 'capitalize' }}>
+                        {role.role.replace(/_/g, ' ')}
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                        {isSuperAdmin ? 'Full system access (locked)' : 'Customizable'}
+                      </div>
+                    </td>
+                    {permissionFields.map(field => (
+                      <td key={field.key} style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <label style={{ 
+                            position: 'relative', 
+                            display: 'inline-block', 
+                            width: '40px', 
+                            height: '24px',
+                            cursor: isSuperAdmin ? 'not-allowed' : (saving === role.id ? 'wait' : 'pointer'),
+                            opacity: isSuperAdmin ? 0.5 : 1
+                          }}>
+                            <input 
+                              type="checkbox" 
+                              checked={role[field.key]} 
+                              disabled={isSuperAdmin || saving === role.id}
+                              onChange={() => togglePermission(role.id, field.key, role[field.key])}
+                              style={{ opacity: 0, width: 0, height: 0 }}
+                            />
+                            <span style={{
+                              position: 'absolute',
+                              cursor: isSuperAdmin ? 'not-allowed' : 'pointer',
+                              top: 0, left: 0, right: 0, bottom: 0,
+                              backgroundColor: role[field.key] ? 'var(--color-primary)' : 'var(--color-border)',
+                              transition: '.4s',
+                              borderRadius: '24px'
+                            }}>
+                              <span style={{
+                                position: 'absolute',
+                                content: '""',
+                                height: '18px',
+                                width: '18px',
+                                left: '3px',
+                                bottom: '3px',
+                                backgroundColor: 'white',
+                                transition: '.4s',
+                                borderRadius: '50%',
+                                transform: role[field.key] ? 'translateX(16px)' : 'translateX(0)'
+                              }} />
+                            </span>
+                          </label>
+                        </div>
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-
       </div>
     </>
   );

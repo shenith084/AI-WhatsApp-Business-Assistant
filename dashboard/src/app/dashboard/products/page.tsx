@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getProducts, addProduct, updateProduct, deleteProduct, getSettings } from '@/app/actions';
+import { getProducts, addProduct, updateProduct, deleteProduct, getAuthSession } from '@/app/actions';
+import { showAlert, showConfirm, showToast } from '@/app/utils/swal';
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<any[]>([]);
@@ -19,7 +20,12 @@ export default function ProductsPage() {
 
   // Initial load
   useEffect(() => {
-    fetchProducts();
+    async function init() {
+      const session = await getAuthSession();
+      if (session?.business_id) setBusinessId(session.business_id);
+      fetchProducts();
+    }
+    init();
   }, []);
 
   async function fetchProducts() {
@@ -27,7 +33,6 @@ export default function ProductsPage() {
     const { data, error } = await getProducts();
     if (!error && data) {
       setProducts(data);
-      if (data.length > 0) setBusinessId(data[0].business_id);
     }
     setLoading(false);
   }
@@ -55,13 +60,12 @@ export default function ProductsPage() {
       sizes: p.variants?.size ? p.variants.size.join(', ') : '',
       colors: p.variants?.color ? p.variants.color.join(', ') : ''
     });
-    setBusinessId(p.business_id);
     setShowModal(true);
   }
 
   async function handleSave() {
     if (!form.name || !form.price) {
-      alert("Name and Price are required.");
+      showAlert("Validation Error", "Name and Price are required.", "warning");
       return;
     }
 
@@ -83,19 +87,31 @@ export default function ProductsPage() {
 
     if (editProduct) {
       const { error } = await updateProduct(editProduct.id, payload);
-      if (error) alert(error.message);
+      if (error) {
+        showAlert("Error updating product", error.message);
+      } else {
+        showToast("Product updated successfully!");
+      }
     } else {
       const { error } = await addProduct(payload);
-      if (error) alert(error.message);
+      if (error) {
+        showAlert("Error adding product", error.message);
+      } else {
+        showToast("Product added successfully!");
+      }
     }
     setShowModal(false);
     fetchProducts();
   }
 
   async function handleDelete(id: string) {
-    if (confirm("Are you sure you want to delete this product?")) {
+    if (await showConfirm("Delete Product", "Are you sure you want to delete this product?", "Yes, delete it")) {
       const { error } = await deleteProduct(id);
-      if (error) alert(error.message);
+      if (error) {
+        showAlert("Error deleting product", error.message);
+      } else {
+        showToast("Product deleted!");
+      }
       fetchProducts();
     }
   }

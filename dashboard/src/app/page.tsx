@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { loginAction } from '@/app/actions';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,18 +16,15 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
 
-    // Demo login: accept the seeded credentials
-    if (email === 'ashan@fashiongallery.lk' && password === 'Admin@123') {
-      // In production: call /api/auth/login → verify bcrypt → set cookie
-      localStorage.setItem('waba_auth', JSON.stringify({
-        name: 'Ashan Perera',
-        email,
-        role: 'business_owner',
-        business: 'Fashion Gallery'
-      }));
-      router.push('/dashboard');
-    } else {
-      setError('Invalid email or password. Demo: ashan@fashiongallery.lk / Admin@123');
+    try {
+      const res = await loginAction(email, password);
+      if (res.error) {
+        setError(res.error);
+      } else {
+        router.push('/dashboard');
+      }
+    } catch (err: any) {
+      setError('An error occurred during login. Please try again.');
     }
     setLoading(false);
   }
@@ -156,17 +154,7 @@ export default function LoginPage() {
               )}
             </button>
           </form>
-
-          <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid var(--color-border)', textAlign: 'center' }}>
-            <p style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-              Demo credentials: ashan@fashiongallery.lk / Admin@123
-            </p>
-          </div>
         </div>
-
-        <p style={{ textAlign: 'center', marginTop: '24px', fontSize: '12px', color: 'var(--color-text-muted)' }}>
-          AI WhatsApp Business Assistant · Pixzora Lab2 · 2026
-        </p>
       </div>
     </div>
   );
