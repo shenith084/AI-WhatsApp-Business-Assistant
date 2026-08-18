@@ -1,0 +1,498 @@
+{
+  "id": "O1wPLgkZtz9ct2rE",
+  "name": "02 \u2014 Product Inquiry Flow",
+  "nodes": [
+    {
+      "parameters": {
+        "resource": "database",
+        "operation": "executeQuery",
+        "query": "SELECT\n  id, name, description, price, category, stock, variants, image_url, tags\nFROM products\nWHERE\n  business_id = '{{ $json.business_id }}'\n  AND is_active = true\n  AND (\n    -- If the customer didn't ask for a specific product, just show them everything\n    (LENGTH('{{ $json.entities?.product_category ?? \"\" }}') = 0 AND LENGTH('{{ $json.entities?.product_name ?? \"\" }}') = 0)\n    \n    -- Otherwise, search by the category they asked for\n    OR category ILIKE '%' || '{{ $json.entities?.product_category ?? \"\" }}' || '%'\n    \n    -- Or search by the exact product name they asked for\n    OR to_tsvector('english', name) @@ plainto_tsquery('english', '{{ $json.entities?.product_name ?? \"NO_MATCH\" }}')\n    OR name ILIKE '%' || '{{ $json.entities?.product_name ?? \"NO_MATCH\" }}' || '%'\n    OR '{{ $json.entities?.product_name ?? \"NO_MATCH\" }}' = ANY(tags)\n  )\nORDER BY\n  -- Show best sellers first when answering general questions\n  CASE WHEN 'best seller' = ANY(tags) THEN 0 ELSE 1 END\nLIMIT 3;\n",
+        "options": {}
+      },
+      "id": "78e2f17e-bbb5-4454-8c8b-a18b5619eee0",
+      "name": "Look Up Products",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        144
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "fEFpw1RkrOojQybt",
+          "name": "Postgres account"
+        }
+      },
+      "notes": "Full-text search + category + tag match. Returns top 3 results."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has_products",
+              "leftValue": "={{ $json.stock }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "59b8c882-0d83-4629-a35e-9c67b1a03b12",
+      "name": "In Stock?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        144
+      ],
+      "notes": "\u00c2\u00a710.2 Node 2: Checks stock > 0. Out-of-stock path still replies but flags availability."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const allItems = $input.all();\nconst parentData = $('Workflow Input').item?.json ?? {};\nconst products = allItems.map(item => item.json);\nconst inStock  = products.filter(p => p.stock > 0);\nreturn [{\n  json: {\n    products_json: JSON.stringify(products),\n    in_stock_count: inStock.length,\n    has_products: products.length > 0,\n    business_id: parentData.business_id,\n    business_name: parentData.business_name,\n    intent: parentData.intent,\n    language: parentData.language,\n    chatId: parentData.chatId,\n    phoneNumber: parentData.phoneNumber,\n    messageText: parentData.messageText,\n    discount_json: 'null',\n    pricing_json: 'null'\n  }\n}];",
+        "notice": ""
+      },
+      "id": "d069295b-2c45-43f9-83e7-2038f454bebe",
+      "name": "Prepare AI Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        64
+      ],
+      "notes": "Consolidates product results and classifier context for the response-generation AI Agent."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const parentData = $('Workflow Input').item?.json ?? {};\nreturn [{\n  json: {\n    products_json: JSON.stringify([{ name: 'Item', stock: 0, description: 'Currently out of stock' }]),\n    in_stock_count: 0,\n    has_products: false,\n    business_id: parentData.business_id,\n    business_name: parentData.business_name,\n    intent: parentData.intent,\n    language: parentData.language,\n    chatId: parentData.chatId,\n    phoneNumber: parentData.phoneNumber,\n    messageText: parentData.messageText,\n    discount_json: 'null',\n    pricing_json: 'null'\n  }\n}];",
+        "notice": ""
+      },
+      "id": "66248288-50e6-41d4-83bb-bad145b782b0",
+      "name": "Out of Stock Path",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "curlImport": "",
+        "method": "POST",
+        "url": "={{ $env.WAHA_BASE_URL }}/api/sendText",
+        "authentication": "none",
+        "provideSslCertificates": false,
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $env.WAHA_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session",
+              "value": "={{ $env.PILOT_WAHA_SESSION }}"
+            },
+            {
+              "name": "chatId",
+              "value": "={{ $json.chatId }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.replyText }}"
+            }
+          ]
+        },
+        "options": {},
+        "infoMessage": ""
+      },
+      "id": "ecbcae31-1e5c-4705-985a-ebc3342bd1ff",
+      "name": "Send Text Reply (WAHA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        240
+      ],
+      "notes": "\u00c2\u00a710.2 Node 4: POST /api/sendText to send the reply back to the customer."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Send product image via WAHA API\nconst chatId = $json.chatId;\nconst imageUrl = $json.imageUrl;\nconst replyText = String($json.replyText || '');\nconst session = $env.PILOT_WAHA_SESSION;\nconst wahaUrl = $env.WAHA_BASE_URL;\nconst apiKey = $env.WAHA_API_KEY;\n\nconst result = await this.helpers.httpRequest({\n  method: 'POST',\n  url: wahaUrl + '/api/sendImage',\n  json: true,\n  headers: {\n    'X-Api-Key': apiKey\n  },\n  body: {\n    session: session,\n    chatId: chatId,\n    file: { url: imageUrl },\n    caption: replyText\n  }\n});\n\nreturn [{ json: result }];\n",
+        "notice": ""
+      },
+      "id": "2eb914af-d920-44e3-a26b-cfac52ec7a38",
+      "name": "Send Image + Caption (WAHA)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        48
+      ],
+      "notes": "Sends product image with caption via WAHA. Uses Code node to avoid HTTP Request body formatting issues."
+    },
+    {
+      "parameters": {
+        "resource": "database",
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversations (business_id, customer_number, direction, message_text)\nVALUES (\n  '{{ $('Workflow Input').first().json.business_id }}', \n  '{{ $('Workflow Input').first().json.phoneNumber }}', \n  'outbound', \n  '{{ (typeof $('Format Agent Output').item.json.replyText === \"string\" ? $('Format Agent Output').item.json.replyText.replace(/'/g, \"''\") : JSON.stringify($('Format Agent Output').item.json.replyText).replace(/'/g, \"''\")) }}'\n);\n\n\nUPDATE customers \nSET active_flow = CASE \n    WHEN '{{ (typeof $('Format Agent Output').item.json.replyText === \"string\" ? $('Format Agent Output').item.json.replyText.replace(/'/g, \"''\") : JSON.stringify($('Format Agent Output').item.json.replyText).replace(/'/g, \"''\")) }}' ILIKE '%Name%' AND '{{ (typeof $('Format Agent Output').item.json.replyText === \"string\" ? $('Format Agent Output').item.json.replyText.replace(/'/g, \"''\") : JSON.stringify($('Format Agent Output').item.json.replyText).replace(/'/g, \"''\")) }}' ILIKE '%Address%' THEN 'checkout_flow'\n    ELSE active_flow \nEND\nWHERE phone_number = '{{ $(\"Workflow Input\").first().json.phoneNumber }}' \nAND business_id = '{{ $(\"Workflow Input\").first().json.business_id }}';",
+        "options": {}
+      },
+      "id": "5c63ac73-8b96-4d18-8c0f-4a1085f3a556",
+      "name": "Log Outbound Reply",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        144
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "fEFpw1RkrOojQybt",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "events": "worklfow_call",
+        "notice": "",
+        "outdatedVersionWarning": "",
+        "returnOutput": "lastRunOnly"
+      },
+      "id": "b10d4b1f-6f25-4aec-8c95-2dfb7c7f6895",
+      "name": "Workflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "aiAgentStarterCallout": "",
+        "promptType": "define",
+        "hasOutputParser": false,
+        "credentials": "",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "message": "==You are {{$json.business_name}}'s friendly WhatsApp sales assistant. Reply in the customer's language ({{$json.language}}).\n\nTone: warm, concise, like a helpful shop assistant. Use 1-2 emojis.\n\nYou are given:\n- Customer intent: {{$json.intent}}\n- Matched product(s): {{$json.products_json}}\n\nRules:\n- Keep replies under 200 words.\n- Always end with one clear next step.\n- Never state a price not in the data.\n- All prices in the data are base values (USD). You MUST convert them to LKR (multiply by 300) when quoting prices to the customer. Always format prices as 'LKR [amount]' (e.g., LKR 4500).\n- If no matching product found, say so honestly.\n- Do not include image URLs or links in your text. The system automatically attaches photos.\n- If the customer is ready to buy or order, explicitly ask them for their: Name, Mobile Number, Delivery Address, and Preferred Payment Method (Cash on Delivery or Bank Transfer).\n- CRITICAL: If the customer's message is just a simple acknowledgment (like 'ok', 'thanks') in response to an order being confirmed or placed, DO NOT ask them for delivery details again! Just respond with a friendly 'You're welcome! Let us know if you need anything else!'"
+            },
+            {
+              "type": "HumanMessagePromptTemplate",
+              "messageType": "text",
+              "message": "={{ $json.messageText }}"
+            }
+          ]
+        },
+        "text": "={{ $json.messageText }}"
+      },
+      "id": "f649aa61-694d-4ddb-9743-1881974dfd0b",
+      "name": "AI Response Agent",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        272,
+        144
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "notice": "",
+        "modelName": "={{ $env.GEMINI_RESPONSE_MODEL }}",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "f6d194b3-100a-4f35-b43a-e7161cc51457",
+      "name": "Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        272,
+        352
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "dQ3k893EEzlvEi3t",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "notice": "",
+        "sessionIdType": "customKey",
+        "sessionKey": "=={{ $json.chatId }}",
+        "tableName": "chat_message_history",
+        "contextWindowLength": 5
+      },
+      "id": "d4d68f4d-cedd-4f81-ab80-2bf5d57ec09f",
+      "name": "Postgres Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        384,
+        352
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fEFpw1RkrOojQybt",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "\nlet ctx = {};\ntry {\n  ctx = $('Prepare AI Input').item.json;\n} catch(e) {\n  try {\n    ctx = $('Out of Stock Path').item.json;\n  } catch(e2) {}\n}\n\nconst replyText = $input.item.json.text || $input.item.json.output;\nconst products = JSON.parse(ctx.products_json ?? '[]');\nconst messageText = (ctx.messageText ?? '').toLowerCase();\n\n// Only send image if:\n// 1. User explicitly asked for a photo/image/picture, OR\n// 2. Exactly 1 specific product was matched (not a general \"what do you have\" query)\nconst isPhotoRequest = /photo|image|picture|show|see|look|view|pic/i.test(messageText);\nconst isSingleProduct = products.length === 1;\nconst firstProduct = products[0];\n\nlet hasImage = false;\nlet imageUrl = '';\n\nif (firstProduct && firstProduct.image_url && (isPhotoRequest || isSingleProduct)) {\n  hasImage = true;\n  imageUrl = firstProduct.image_url;\n}\n\nreturn {\n  json: {\n    replyText: replyText,\n    hasImage: hasImage,\n    imageUrl: imageUrl,\n    chatId: ctx.chatId,\n    session: ctx.session\n  }\n};\n",
+        "notice": ""
+      },
+      "id": "160186d8-807c-49a7-99d8-e692eab91f34",
+      "name": "Format Agent Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        144
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has_image_check",
+              "leftValue": "={{ $json.hasImage }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4fc97c66-dfac-44e8-8c41-2c2891f6c5bb",
+      "name": "Has Image?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        672,
+        144
+      ]
+    }
+  ],
+  "connections": {
+    "Look Up Products": {
+      "main": [
+        [
+          {
+            "node": "In Stock?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "In Stock?": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Out of Stock Path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Input": {
+      "main": [
+        [
+          {
+            "node": "AI Response Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Out of Stock Path": {
+      "main": [
+        [
+          {
+            "node": "AI Response Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Response Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Response Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Response Agent": {
+      "main": [
+        [
+          {
+            "node": "Format Agent Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Agent Output": {
+      "main": [
+        [
+          {
+            "node": "Has Image?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Text Reply (WAHA)": {
+      "main": [
+        [
+          {
+            "node": "Log Outbound Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Image + Caption (WAHA)": {
+      "main": [
+        [
+          {
+            "node": "Log Outbound Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Input": {
+      "main": [
+        [
+          {
+            "node": "Look Up Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Image?": {
+      "main": [
+        [
+          {
+            "node": "Send Image + Caption (WAHA)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Text Reply (WAHA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "nodeGroups": []
+}
