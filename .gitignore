@@ -23,5 +23,11 @@ waha_data/
 *.db
 *.log
 
-# Scratch directory
+# Scratch directory & temporary QR files
 scratch/
+qr.html
+*.key
+*.pem
+
+# Sensitive project credentials
+PROJECT_CREDENTIALS.md
