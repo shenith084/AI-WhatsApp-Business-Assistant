@@ -1,0 +1,316 @@
+[
+  {
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
+    "name": "03 — Bulk Order Flow",
+    "nodes": [
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- §10.3 Node 1: Fetch matching products by category or name\nSELECT id, name, description, price, category, stock, variants, image_url, tags\nFROM products\nWHERE\n  business_id = '{{ $json.business_id }}'\n  AND is_active = true\n  AND stock > 0\n  AND (\n    category ILIKE '{{ $json.entities?.product_category ?? '' }}'\n    OR to_tsvector('english', name) @@ plainto_tsquery('english', '{{ $json.entities?.product_name ?? '' }}')\n    OR name ILIKE '%' || '{{ $json.entities?.product_name ?? '' }}' || '%'\n  )\nORDER BY\n  CASE WHEN 'best seller' = ANY(tags) THEN 0 ELSE 1 END\nLIMIT 3;",
+          "options": {}
+        },
+        "id": "node_bulk_products",
+        "name": "Fetch Products for Bulk",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2,
+        "position": [
+          240,
+          304
+        ],
+        "alwaysOutputData": true,
+        "credentials": {
+          "postgres": {
+            "id": "fEFpw1RkrOojQybt",
+            "name": "Postgres account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- §10.3 Node 2: Fetch best applicable discount rule\n-- Best = highest discount value, most specific category match\nSELECT\n  id, rule_name, product_category, min_quantity, max_quantity,\n  discount_type, discount_value, valid_from, valid_to\nFROM discount_rules\nWHERE\n  business_id = '{{ $('Workflow Input').first().json.business_id }}'\n  AND is_active = true\n  AND min_quantity <= '{{ $('Workflow Input').first().json.entities?.quantity ?? 1 }}'\n  AND (max_quantity IS NULL OR max_quantity >= '{{ $('Workflow Input').first().json.entities?.quantity ?? 1 }}')\n  AND (valid_from IS NULL OR valid_from <= CURRENT_DATE)\n  AND (valid_to   IS NULL OR valid_to   >= CURRENT_DATE)\n  AND (\n    product_category IS NULL\n    OR product_category ILIKE '{{ $('Workflow Input').first().json.entities?.product_category ?? '' }}'\n  )\nORDER BY\n  -- Category-specific rules rank first\n  CASE WHEN product_category IS NOT NULL THEN 0 ELSE 1 END,\n  -- Then by highest discount value\n  discount_value DESC\nLIMIT 1;",
+          "options": {}
+        },
+        "id": "node_fetch_discount",
+        "name": "Fetch Discount Rule",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2,
+        "position": [
+          464,
+          304
+        ],
+        "alwaysOutputData": true,
+        "credentials": {
+          "postgres": {
+            "id": "fEFpw1RkrOojQybt",
+            "name": "Postgres account"
+          }
+        },
+        "notes": "§10.3 Node 2: Fetches the single best-applicable discount rule. No stacking."
+      },
+      {
+        "parameters": {
+          "jsCode": "// §10.3 Node 3: Calculate pricing breakdown (JavaScript)\n// Never stacks multiple rules — applies the single best match.\n\nconst products = $('Fetch Products for Bulk').all().map(i => i.json);\nconst discount  = $('Fetch Discount Rule').first()?.json ?? null;\nconst parentCtx = $('Workflow Input').first()?.json ?? {};\n\nconst quantity  = parentCtx.entities?.quantity ?? 1;\nconst product   = products[0]; // primary match\n\nif (!product) {\n  return [{\n    json: {\n      ...parentCtx,\n      pricingError:  true,\n      products_json: JSON.stringify([]),\n      discount_json: JSON.stringify(discount),\n      pricing_json:  JSON.stringify(null)\n    }\n  }];\n}\n\nif (product.stock < quantity) {\n  return [{\n    json: {\n      ...parentCtx,\n      pricingError:  true,\n      stockError:    true,\n      products_json: JSON.stringify([product]),\n      discount_json: 'null',\n      pricing_json:  JSON.stringify({\n        error: `Requested ${quantity}, but only ${product.stock} available in stock.`\n      })\n    }\n  }];\n}\n\nconst unitPrice  = parseFloat(product.price);\nconst subtotal   = unitPrice * quantity;\n\nlet discountAmount = 0;\nlet finalTotal     = subtotal;\nlet discountLabel  = 'No discount';\n\nif (discount) {\n  if (discount.discount_type === 'percentage') {\n    discountAmount = subtotal * (parseFloat(discount.discount_value) / 100);\n    finalTotal     = subtotal - discountAmount;\n    discountLabel  = `${discount.discount_value}% off`;\n  } else if (discount.discount_type === 'fixed_price') {\n    // fixed_price overrides unit price per item\n    const fixedUnitPrice = parseFloat(discount.discount_value);\n    finalTotal           = fixedUnitPrice * quantity;\n    discountAmount       = subtotal - finalTotal;\n    discountLabel        = `$${discount.discount_value}/item (special price)`;\n  }\n}\n\nconst pricing = {\n  product_name:    product.name,\n  unit_price:      unitPrice.toFixed(2),\n  quantity,\n  subtotal:        subtotal.toFixed(2),\n  discount_label:  discountLabel,\n  discount_amount: discountAmount.toFixed(2),\n  final_total:     finalTotal.toFixed(2),\n  currency:        'USD'\n};\n\nreturn [{\n  json: {\n    ...parentCtx,\n    pricingError:  false,\n    products_json: JSON.stringify(products),\n    discount_json: JSON.stringify(discount ?? {}),\n    pricing_json:  JSON.stringify(pricing)\n  }\n}];\n"
+        },
+        "id": "node_calculate_pricing",
+        "name": "Calculate Bulk Pricing",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          688,
+          304
+        ],
+        "notes": "§10.3 Node 3: Pure JS pricing calculation. Applies percentage or fixed_price discount. Never stacks rules."
+      },
+      {
+        "parameters": {
+          "jsCode": "// Parse AI Agent bulk order reply\n// AI Agent node outputs the text in $input.item.json.output\nconst aiText = $input.item.json.output ?? $input.item.json.text ?? '';\nconst ctx = $('Calculate Bulk Pricing').item.json;\n\nreturn [{\n  json: {\n    replyText:   aiText.trim(),\n    chatId:      ctx.chatId,\n    business_id: ctx.business_id,\n    phoneNumber: ctx.phoneNumber\n  }\n}];"
+        },
+        "id": "node_parse_bulk_reply",
+        "name": "Parse Bulk Reply",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1184,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://waha:3000/api/sendText",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-Api-Key",
+                "value": "={{ 'CHANGE_ME_waha_api_key_here' }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "session",
+                "value": "={{ 'fashion-gallery' }}"
+              },
+              {
+                "name": "chatId",
+                "value": "={{ $json.chatId }}"
+              },
+              {
+                "name": "text",
+                "value": "={{ $json.replyText }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "node_send_bulk_reply",
+        "name": "Send Bulk Pricing (WAHA)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1344,
+          304
+        ],
+        "notes": "§10.3 Node 5: Sends pricing breakdown. Text-based CONFIRM/AGENT CTA since WAHA doesn't reliably support native interactive buttons."
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO conversations (business_id, customer_number, direction, message_text)\nVALUES (\n  '{{ $('Parse Bulk Reply').item.json.business_id }}',\n  '{{ $('Parse Bulk Reply').item.json.phoneNumber }}',\n  'outbound',\n  '{{ (typeof $('Parse Bulk Reply').item.json.replyText === \"string\" ? $('Parse Bulk Reply').item.json.replyText.replace(/'/g, \"''\") : JSON.stringify($('Parse Bulk Reply').item.json.replyText).replace(/'/g, \"''\")) }}'\n);",
+          "options": {}
+        },
+        "id": "node_log_bulk_outbound",
+        "name": "Log Bulk Reply",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2,
+        "position": [
+          1568,
+          304
+        ],
+        "alwaysOutputData": true,
+        "credentials": {
+          "postgres": {
+            "id": "fEFpw1RkrOojQybt",
+            "name": "Postgres account"
+          }
+        }
+      },
+      {
+        "parameters": {},
+        "id": "node_execute_trigger",
+        "name": "Workflow Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "modelName": "models/gemini-3.5-flash-lite",
+          "options": {
+            "temperature": 0.7
+          }
+        },
+        "id": "node_call_gemini_api",
+        "name": "Gemini Bulk Model",
+        "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+        "typeVersion": 1,
+        "position": [
+          912,
+          512
+        ],
+        "credentials": {
+          "googlePalmApi": {
+            "id": "dQ3k893EEzlvEi3t",
+            "name": "Google Gemini(PaLM) Api account"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "options": {
+            "returnIntermediateSteps": false
+          },
+          "messages": {
+            "messageValues": [
+              {
+                "type": "SystemMessagePromptTemplate",
+                "message": ""
+              },
+              {
+                "type": "HumanMessagePromptTemplate",
+                "messageType": "text",
+                "message": "={{ $json.messageText || $json.prompt || 'Bulk order inquiry' }}"
+              }
+            ]
+          },
+          "text": "={{ $json.messageText || $json.prompt || 'Bulk order inquiry' }}"
+        },
+        "id": "node_ai_agent_bulk",
+        "name": "AI Bulk Agent",
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.4,
+        "position": [
+          880,
+          304
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
+      }
+    ],
+    "connections": {
+      "Fetch Products for Bulk": {
+        "main": [
+          [
+            {
+              "node": "Fetch Discount Rule",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch Discount Rule": {
+        "main": [
+          [
+            {
+              "node": "Calculate Bulk Pricing",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Calculate Bulk Pricing": {
+        "main": [
+          [
+            {
+              "node": "AI Bulk Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse Bulk Reply": {
+        "main": [
+          [
+            {
+              "node": "Send Bulk Pricing (WAHA)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send Bulk Pricing (WAHA)": {
+        "main": [
+          [
+            {
+              "node": "Log Bulk Reply",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Workflow Input": {
+        "main": [
+          [
+            {
+              "node": "Fetch Products for Bulk",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gemini Bulk Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "AI Bulk Agent",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "AI Bulk Agent": {
+        "main": [
+          [
+            {
+              "node": "Parse Bulk Reply",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "binaryMode": "separate",
+      "availableInMCP": false
+    },
+    "active": true,
+    "id": "luKfWUZuv3MeUEDt"
+  }
+]

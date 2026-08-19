@@ -1,0 +1,73 @@
+services:
+  # ─── WAHA (WhatsApp HTTP API) ─────────────────────────────────────────────
+  - type: web
+    name: waha-whatsapp-api
+    runtime: image
+    image:
+      url: devlikeapro/waha:latest
+    plan: free
+    region: oregon
+    envVars:
+      - key: WHATSAPP_API_KEY
+        sync: false
+      - key: WAHA_DEFAULT_ENGINE
+        value: NOWEBJS
+      - key: WAHA_PRINT_QR
+        value: "true"
+      - key: WAHA_WEBHOOK_URL
+        value: https://n8n-automation-service.onrender.com/webhook/whatsapp-webhook
+      - key: WAHA_WEBHOOK_EVENTS
+        value: message
+
+  # ─── n8n Automation Engine ────────────────────────────────────────────────
+  - type: web
+    name: n8n-automation-service
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    envVars:
+      - key: N8N_PORT
+        value: "10000"
+      - key: PORT
+        value: "10000"
+      - key: N8N_PROTOCOL
+        value: https
+      - key: WEBHOOK_URL
+        value: https://n8n-automation-service.onrender.com
+      - key: N8N_BASIC_AUTH_ACTIVE
+        value: "true"
+      - key: N8N_BASIC_AUTH_USER
+        value: admin
+      - key: N8N_BASIC_AUTH_PASSWORD
+        sync: false
+      - key: N8N_ENCRYPTION_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_CLASSIFIER_MODEL
+        value: gemini-3.5-flash-lite
+      - key: GEMINI_RESPONSE_MODEL
+        value: gemini-3.5-flash-lite
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_DB_HOST
+        sync: false
+      - key: SUPABASE_DB_PORT
+        value: "5432"
+      - key: SUPABASE_DB_NAME
+        value: postgres
+      - key: SUPABASE_DB_USER
+        sync: false
+      - key: SUPABASE_DB_PASSWORD
+        sync: false
+      - key: PILOT_BUSINESS_ID
+        sync: false
+      - key: PILOT_WAHA_SESSION
+        value: fashion-gallery
+      - key: WAHA_BASE_URL
+        value: https://waha-whatsapp-api.onrender.com
+      - key: WAHA_API_KEY
+        sync: false
