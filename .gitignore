@@ -15,6 +15,13 @@ build/
 .DS_Store
 Thumbs.db
 
-# Any data volumes
+# Data volumes & sqlite databases
 n8n_data/
 waha_data/
+*.sqlite
+*.sqlite3
+*.db
+*.log
+
+# Scratch directory
+scratch/
