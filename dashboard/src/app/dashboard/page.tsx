@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { getDashboardMetrics, getOrders, getTickets } from '@/app/actions';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-interface MetricCard { label: string; value: string; change: string; up: boolean; icon: JSX.Element; color: string; gradient: string; }
+interface MetricCard { label: string; value: string; change: string; up: boolean; icon: React.ReactNode; color: string; gradient: string; }
 interface RecentOrder { id: string; customer: string; items: string; total: string; status: string; time: string; }
 interface RecentTicket { id: string; customer: string; reason: string; status: string; time: string; }
 interface IntentData { intent: string; count: number; pct: number; }
