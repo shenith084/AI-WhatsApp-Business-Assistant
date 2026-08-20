@@ -31,6 +31,7 @@ services:
       # Security — required if WHATSAPP_API_KEY is set
       WHATSAPP_API_KEY: ${WAHA_API_KEY}
       WAHA_DEFAULT_ENGINE: NOWEBJS
+      WHATSAPP_DEFAULT_ENGINE: NOWEBJS
       # Enable WAHA Plus features if you have the image
       WAHA_PRINT_QR: "true"
       # Webhooks will be configured globally

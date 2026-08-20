@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WhatsApp WAHA Local QR</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin-top: 50px; background: #f0f2f5; }
+    .card { background: white; padding: 30px; border-radius: 10px; display: inline-block; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+    img { max-width: 300px; border: 2px solid #ddd; padding: 10px; border-radius: 10px; margin-top: 20px;}
+    button { background: #25D366; color: white; border: none; padding: 10px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; }
+    button:hover { background: #1ebe5d; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Scan to Link Local WAHA</h2>
+    <p>1. Open WhatsApp on your phone.<br>2. Tap Menu or Settings and select Linked Devices.<br>3. Point your phone to this screen.</p>
+    <button onclick="fetchQR()">Load QR Code</button>
+    <br>
+    <img id="qr-img" style="display:none;" />
+    <p id="status"></p>
+  </div>
+
+  <script>
+    async function fetchQR() {
+      const status = document.getElementById('status');
+      const img = document.getElementById('qr-img');
+      status.innerText = "Fetching QR code from WAHA...";
+      
+      try {
+        const response = await fetch('http://localhost:3000/api/sessions/fashion-gallery/auth/qr', {
+          headers: { 'X-Api-Key': 'CHANGE_ME_waha_api_key_here' }
+        });
+        
+        if (response.ok) {
+          const blob = await response.blob();
+          img.src = URL.createObjectURL(blob);
+          img.style.display = "inline-block";
+          status.innerText = "QR Loaded! Please scan it quickly.";
+        } else {
+          status.innerText = "Error: WAHA returned " + response.status + ". Make sure the session is running on localhost:3000";
+        }
+      } catch (e) {
+        status.innerText = "Failed to connect to localhost:3000. Is WAHA running?";
+      }
+    }
+  </script>
+</body>
+</html>
