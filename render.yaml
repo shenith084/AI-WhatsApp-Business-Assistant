@@ -36,6 +36,18 @@ services:
         value: "10000"
       - key: PORT
         value: "10000"
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=400"
+      - key: N8N_DIAGNOSTICS_ENABLED
+        value: "false"
+      - key: N8N_VERSION_NOTIFICATIONS_ENABLED
+        value: "false"
+      - key: N8N_TEMPLATES_ENABLED
+        value: "false"
+      - key: EXECUTIONS_DATA_PRUNE
+        value: "true"
+      - key: EXECUTIONS_DATA_MAX_AGE
+        value: "24"
       - key: N8N_PROTOCOL
         value: https
       - key: WEBHOOK_URL
