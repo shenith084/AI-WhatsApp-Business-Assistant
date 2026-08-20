@@ -1,16 +1,15 @@
 FROM n8nio/n8n:latest
 
 USER root
-# Copy the working workflows into the container
+
+# Copy workflows into the container
 RUN mkdir -p /home/node/.n8n/workflows_import
 COPY workflows_deploy/ /home/node/.n8n/workflows_import/
 
-# Create entrypoint script to automatically import and activate workflows on start
-RUN echo '#!/bin/sh' > /docker-entrypoint-custom.sh && \
-    echo 'n8n import:workflow --separate --input=/home/node/.n8n/workflows_import &' >> /docker-entrypoint-custom.sh && \
-    echo 'exec /docker-entrypoint.sh' >> /docker-entrypoint-custom.sh && \
-    chmod +x /docker-entrypoint-custom.sh
+# Fix permissions so the node user can access these files
+RUN chown -R node:node /home/node/.n8n/workflows_import
 
 USER node
 
-ENTRYPOINT ["/docker-entrypoint-custom.sh"]
+# Use the standard n8n entrypoint — n8n will load workflows on first start via N8N_IMPORT_WORKFLOWS_FROM
+CMD ["n8n", "start"]
