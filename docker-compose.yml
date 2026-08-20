@@ -61,14 +61,15 @@ services:
       WEBHOOK_URL: ${N8N_WEBHOOK_URL}          # public URL for WAHA callbacks
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
 
-      # ── Database (n8n's own internal DB — SQLite by default, fine for MVP) ──
-      # Uncomment below to use Postgres for n8n's own metadata too:
-      # DB_TYPE: postgresdb
-      # DB_POSTGRESDB_HOST: ${SUPABASE_DB_HOST}
-      # DB_POSTGRESDB_PORT: 5432
-      # DB_POSTGRESDB_DATABASE: postgres
-      # DB_POSTGRESDB_USER: ${SUPABASE_DB_USER}
-      # DB_POSTGRESDB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      # ── Database — Using Postgres (Supabase) for speed ──
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: ${SUPABASE_DB_HOST}
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: postgres
+      DB_POSTGRESDB_USER: ${SUPABASE_DB_USER}
+      DB_POSTGRESDB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      DB_POSTGRESDB_SSL_REJECT_UNAUTHORIZED: "false"
+      N8N_TRUST_PROXY: "true"
 
       # ── Auth ──
       N8N_BASIC_AUTH_ACTIVE: "true"
