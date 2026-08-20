@@ -16,14 +16,19 @@ services:
         value: "true"
       - key: WAHA_WEBHOOK_URL
         value: https://n8n-automation-service.onrender.com/webhook/whatsapp-webhook
+      - key: WAHA_DASHBOARD_USERNAME
+        value: admin
+      - key: WAHA_DASHBOARD_PASSWORD
+        sync: false
       - key: WAHA_WEBHOOK_EVENTS
         value: message
 
   # ─── n8n Automation Engine ────────────────────────────────────────────────
   - type: web
     name: n8n-automation-service
-    runtime: docker
-    dockerfilePath: ./Dockerfile
+    runtime: image
+    image:
+      url: n8nio/n8n:latest
     plan: free
     region: oregon
     envVars:
