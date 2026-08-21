@@ -1,4 +1,5 @@
 {
+  "id": "uTLQmGUI9n4Z7ktj",
   "meta": {
     "templateCredsSetupCompleted": true
   },
@@ -495,6 +496,5 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "active": true,
-  "id": "uTLQmGUI9n4Z7ktj"
+  "active": true
 }

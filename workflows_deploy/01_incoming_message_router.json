@@ -1,4 +1,8 @@
 {
+  "id": "Yc06YJ1b81bDAwhy",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
   "name": "01 — Incoming Message Router",
   "nodes": [
     {
@@ -829,6 +833,5 @@
     "saveDataSuccessExecution": "all",
     "callerPolicy": "workflowsFromSameOwner"
   },
-  "versionId": "4bf23aa1-0000-0000-0000-000000000000",
-  "id": "Yc06YJ1b81bDAwhy"
+  "versionId": "4bf23aa1-0000-0000-0000-000000000000"
 }
