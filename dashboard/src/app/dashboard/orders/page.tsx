@@ -25,10 +25,17 @@ export default function OrdersPage() {
 
   useEffect(() => {
     fetchOrders();
+    
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(() => {
+      fetchOrders(true);
+    }, 30000);
+    
+    return () => clearInterval(interval);
   }, []);
 
-  async function fetchOrders() {
-    setLoading(true);
+  async function fetchOrders(isBackground = false) {
+    if (!isBackground) setLoading(true);
     try {
       const { data, error } = await getOrders();
       if (error) {
@@ -39,7 +46,7 @@ export default function OrdersPage() {
     } catch (err: any) {
       setFetchError(err.message || 'Server Action Failed');
     }
-    setLoading(false);
+    if (!isBackground) setLoading(false);
   }
 
   function openEdit(o: any) {
