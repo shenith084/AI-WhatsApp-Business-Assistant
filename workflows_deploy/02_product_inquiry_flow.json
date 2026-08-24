@@ -64,7 +64,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "const allItems = $input.all();\nconst parentData = $('Workflow Input').item?.json ?? {};\nconst products = allItems.map(item => item.json);\nconst inStock  = products.filter(p => p.stock > 0);\nreturn [{\n  json: {\n    products_json: JSON.stringify(products),\n    in_stock_count: inStock.length,\n    has_products: products.length > 0,\n    business_id: parentData.business_id,\n    business_name: parentData.business_name,\n    intent: parentData.intent,\n    language: parentData.language,\n    chatId: parentData.chatId,\n    phoneNumber: parentData.phoneNumber,\n    messageText: parentData.messageText,\n    discount_json: 'null',\n    pricing_json: 'null'\n  }\n}];",
+        "jsCode": "const allItems = $input.all();\nconst parentData = $('Workflow Input').item?.json ?? {};\nconst products = allItems.map(item => item.json);\nconst inStock  = products.filter(p => p.stock > 0);\nreturn [{\n  json: {\n    products_json: JSON.stringify(products),\n    in_stock_count: inStock.length,\n    has_products: products.length > 0,\n    business_id: parentData.business_id,\n    business_name: parentData.business_name,\n    intent: parentData.intent,\n    language: parentData.language,\n    chatId: parentData.chatId,\n    phoneNumber: parentData.phoneNumber,\n    messageText: parentData.messageText,\n    contextHistory: parentData.contextHistory || '(no prior conversation)',\n    discount_json: 'null',\n    pricing_json: 'null'\n  }\n}];",
         "notice": ""
       },
       "id": "d069295b-2c45-43f9-83e7-2038f454bebe",

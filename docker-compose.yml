@@ -34,9 +34,13 @@ services:
       WHATSAPP_DEFAULT_ENGINE: NOWEBJS
       # Enable WAHA Plus features if you have the image
       WAHA_PRINT_QR: "true"
-      # Webhooks will be configured globally
-      WAHA_WEBHOOK_URL: http://n8n:5678/webhook/whatsapp-webhook
-      WAHA_WEBHOOK_EVENTS: message
+      # Webhooks configured globally
+      WHATSAPP_HOOK_URL: http://n8n:5678/webhook/whatsapp-webhook
+      WHATSAPP_HOOK_EVENTS: message
+      
+      # Dashboard Credentials
+      WAHA_DASHBOARD_USERNAME: ${WAHA_DASHBOARD_USERNAME}
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD}
 
   # ─── n8n — Workflow Automation Engine ─────────────────────────────────────
   n8n:

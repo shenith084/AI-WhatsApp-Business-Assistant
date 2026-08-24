@@ -143,7 +143,7 @@ export default function OrdersPage() {
             ) : filtered.length === 0 ? (
               <tr><td colSpan={6} style={{ textAlign: 'center', padding: '24px' }}>No orders found.</td></tr>
             ) : filtered.map(o => {
-              const customerName = o.customers?.name || 'Guest';
+              const customerName = o.delivery_name || o.customers?.name || 'Guest';
               const initial = customerName.charAt(0).toUpperCase();
               
               return (
@@ -191,9 +191,12 @@ export default function OrdersPage() {
               <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid var(--color-border)' }}>
                 <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Customer Info</div>
                 <div style={{ fontWeight: 600, fontSize: '15px', color: 'var(--color-text-main)', marginBottom: '2px' }}>
-                  {editOrder.customers?.name || 'Guest'}
+                  {editOrder.delivery_name || editOrder.customers?.name || 'Guest'}
                 </div>
-                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>{editOrder.customer_number}</div>
+                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '2px' }}>{editOrder.delivery_mobile || editOrder.customer_number}</div>
+                {editOrder.delivery_address && (
+                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px', lineHeight: '1.4' }}>📍 {editOrder.delivery_address}</div>
+                )}
               </div>
               <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid var(--color-border)' }}>
                 <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Order Summary</div>
@@ -205,9 +208,17 @@ export default function OrdersPage() {
                      (editOrder.payment_method || 'N/A').toUpperCase()}
                   </span>
                 </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '13px' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>Items Total</span>
+                  <span style={{ fontWeight: 500 }}>LKR {(editOrder.total_price || 0).toLocaleString()}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '13px' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>Delivery Charge</span>
+                  <span style={{ fontWeight: 500 }}>LKR {(editOrder.delivery_charge || 350).toLocaleString()}</span>
+                </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--color-border)' }}>
-                  <span style={{ fontWeight: 600 }}>Total Price</span>
-                  <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>LKR {(editOrder.total_price || 0).toLocaleString()}</span>
+                  <span style={{ fontWeight: 600 }}>Grand Total</span>
+                  <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>LKR {((editOrder.total_price || 0) + (editOrder.delivery_charge || 350)).toLocaleString()}</span>
                 </div>
               </div>
             </div>
