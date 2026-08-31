@@ -1,0 +1,1 @@
+{"message":"Cannot GET /api/sessions/fashion-gallery/auth/qr","error":"Not Found","statusCode":404}

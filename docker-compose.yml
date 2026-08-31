@@ -26,7 +26,7 @@ services:
     ports:
       - "3000:3000"          # WAHA dashboard: http://localhost:3000
     volumes:
-      - waha_data:/app/.waha
+      - waha_data:/app/.sessions
     environment:
       # Security — required if WHATSAPP_API_KEY is set
       WHATSAPP_API_KEY: ${WAHA_API_KEY}
@@ -41,6 +41,10 @@ services:
       # Dashboard Credentials
       WAHA_DASHBOARD_USERNAME: ${WAHA_DASHBOARD_USERNAME}
       WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD}
+
+      # Auto-start sessions on restart
+      WHATSAPP_RESTART_ALL_SESSIONS: "true"
+      WHATSAPP_START_SESSION: ${PILOT_WAHA_SESSION:-fashion-gallery}
 
   # ─── n8n — Workflow Automation Engine ─────────────────────────────────────
   n8n:
