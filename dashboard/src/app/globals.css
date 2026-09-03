@@ -594,8 +594,23 @@ tr:hover td { background: #f8fafc; }
   
   .topbar {
     padding: 0 16px;
+    justify-content: space-between;
   }
   
+  /* Mobile Topbar Elements */
+  .topbar-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .topbar-profile .profile-name, 
+  .topbar-profile .profile-role {
+    display: none;
+  }
+
   /* Mobile Bottom Navigation */
   .mobile-bottom-nav {
     display: flex;
@@ -638,15 +653,6 @@ tr:hover td { background: #f8fafc; }
   .mobile-nav-icon {
     font-size: 22px;
     margin-bottom: 2px;
-  }
-  
-  /* Hide specific topbar elements on mobile to save space */
-  .topbar-btn {
-    display: none;
-  }
-  .topbar-profile .profile-name, 
-  .topbar-profile .profile-role {
-    display: none;
   }
   
   @keyframes slideUp {
