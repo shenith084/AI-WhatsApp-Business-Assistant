@@ -18,6 +18,7 @@ Thumbs.db
 # Data volumes & sqlite databases
 n8n_data/
 waha_data/
+waha_sessions_backup/
 *.sqlite
 *.sqlite3
 *.db
@@ -26,6 +27,8 @@ waha_data/
 # Scratch directory & temporary QR files
 scratch/
 qr.html
+current_qr.png
+*.tar.gz
 *.key
 *.pem
 

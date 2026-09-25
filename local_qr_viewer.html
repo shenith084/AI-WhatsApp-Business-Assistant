@@ -21,13 +21,39 @@
   </div>
 
   <script>
+    let pollInterval = null;
+
+    async function checkStatus() {
+      try {
+        const res = await fetch('http://localhost:3000/api/sessions?all=true', {
+          headers: { 'X-Api-Key': 'CHANGE_ME_waha_api_key_here' }
+        });
+        if (res.ok) {
+          const sessions = await res.json();
+          const session = sessions.find(s => s.name === 'fashion-gallery');
+          if (session) {
+            if (session.status === 'WORKING') {
+              document.getElementById('status').innerHTML = '<b style="color:green;">✅ WhatsApp Connected & Logged In! Session is Saved.</b>';
+              document.getElementById('qr-img').style.display = 'none';
+              if (pollInterval) clearInterval(pollInterval);
+              return true;
+            }
+          }
+        }
+      } catch (e) {}
+      return false;
+    }
+
     async function fetchQR() {
       const status = document.getElementById('status');
       const img = document.getElementById('qr-img');
       status.innerText = "Fetching QR code from WAHA...";
       
+      const isConnected = await checkStatus();
+      if (isConnected) return;
+
       try {
-        const response = await fetch('http://localhost:3000/api/sessions/fashion-gallery/auth/qr', {
+        const response = await fetch('http://localhost:3000/api/fashion-gallery/auth/qr?t=' + Date.now(), {
           headers: { 'X-Api-Key': 'CHANGE_ME_waha_api_key_here' }
         });
         
@@ -35,14 +61,18 @@
           const blob = await response.blob();
           img.src = URL.createObjectURL(blob);
           img.style.display = "inline-block";
-          status.innerText = "QR Loaded! Please scan it quickly.";
+          status.innerHTML = "<b>QR Loaded! Scan it with WhatsApp (Linked Devices).</b><br>Auto-refreshing every 6 seconds...";
         } else {
-          status.innerText = "Error: WAHA returned " + response.status + ". Make sure the session is running on localhost:3000";
+          status.innerText = "WAHA status: " + response.status + ".";
         }
       } catch (e) {
         status.innerText = "Failed to connect to localhost:3000. Is WAHA running?";
       }
     }
+
+    // Auto-load QR on open and poll
+    fetchQR();
+    pollInterval = setInterval(fetchQR, 6000);
   </script>
 </body>
 </html>
